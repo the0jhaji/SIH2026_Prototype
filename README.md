@@ -7,17 +7,18 @@ operator, the system recognises predefined experiment activities against a
 live monitoring dashboard — fully offline.
 
 This repository contains the **software prototype foundation**: a React
-dashboard, a FastAPI backend, WebSocket streaming and a configurable
-experiment simulator. Real AI perception (CV / YOLO / pose) comes in later
-phases. **No cloud services, no cloud TTS, no LLM validation.**
+dashboard, a FastAPI backend, WebSocket streaming, a configurable experiment
+simulator, and a standalone OpenCV perception pipeline (Phase 3). Real trained
+detection enters by dropping an ONNX model into `models/yolo/`. **No cloud
+services, no cloud TTS, no LLM validation.**
 
 ## Monorepo layout
 
 ```
 frontend/   React + Vite + Tailwind dashboard
 backend/    FastAPI server (REST + WebSocket + state machine + simulator)
-ai/         perception pipeline (planned: OpenCV → YOLO → Pose → HAR)
-models/     model weights (git-ignored, not committed)
+ai/         OpenCV perception pipeline (mock AND YOLO detectors + webcam) — no FastAPI deps
+models/     model weights (git-ignored, never auto-downloaded)
 data/       runtime data: recordings/ and logs/ (git-ignored)
 docs/       architecture and design notes
 ```
@@ -25,7 +26,7 @@ docs/       architecture and design notes
 ## Architecture in one breath
 
 ```
-Simulator (scripted detections)          — future: OpenCV/YOLO/pose pipeline
+Simulator (scripted detections)      — real: ai/pipeline (cam → detector) in later phases
    │  Detection {activity, confidence, ts}
    ▼
 Experiment state machine (backend)       — the ONLY authority on step validity
@@ -49,6 +50,15 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\activate            # Windows (PowerShell)
 source .venv/bin/activate           # macOS / Linux
+pip install -r requirements-dev.txt
+```
+
+### AI / perception
+
+```bash
+cd ai
+python -m venv .venv
+.\.venv\Scripts\activate
 pip install -r requirements-dev.txt
 ```
 
@@ -90,7 +100,25 @@ cd frontend && npm run test:reducer
 
 # frontend static checks / build
 cd frontend && npm run lint && npm run build
+
+# ai (perception pipeline, mock + yolo + webcam)
+cd ai && python -m pytest
 ```
+
+## How to run — perception preview (Phase 3)
+
+```bash
+cd ai
+.\.venv\Scripts\activate
+python -m pipeline.cli --detector mock               # live webcam preview window
+python -m pipeline.cli --detector mock --source null # synthetic frames, no camera
+python -m pipeline.cli --detector mock --headless --print-detections   # JSON lines
+```
+
+`--detector yolo` runs `ai/pipeline/yolo.py` (YOLOv8 ONNX via `cv2.dnn`) once
+an exported model sits in `models/yolo/` — nothing is downloaded
+automatically. See `ai/README.md` for the detector interface and the
+`{class_name, confidence, bounding_box, timestamp}` JSON contract.
 
 ## How simulation works
 

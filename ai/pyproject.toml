@@ -1,0 +1,4 @@
+# pyproject for running the ai/ test-suite (same layout as backend/).
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

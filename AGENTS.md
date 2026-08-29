@@ -39,8 +39,22 @@ npm run lint             # oxlint
 npm run test:reducer     # state-machine parity test (Node type-stripping)
 ```
 
+### AI / perception (`ai/`, venv at `ai/.venv`)
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest                       # run tests (39)
+.\.venv\Scripts\python.exe -m pipeline.cli --detector mock --source null   # headless demo
+.\.venv\Scripts\python.exe -m pipeline.cli --detector mock                # live preview
+.\.venv\Scripts\python.exe -m pipeline.cli --detector yolo                # needs models/yolo/*.onnx
+```
+
+The `ai/` package is independent of FastAPI by design. Change
+`ai/pipeline/base.py:BaseDetector` semantics → update `ai/tests/`. Never
+auto-download model weights; drop them into `models/yolo/` manually.
+
 **Always run `npm run lint` and `npm run build` after frontend changes, and
-`python -m pytest` after backend changes.**
+`python -m pytest` after backend changes.** Run `ai` pytest after `ai/`
+changes.
 
 ## Verify parity
 

@@ -1,34 +1,66 @@
-# ai/ — Perception pipeline (planned)
+# ai/ — Local computer-vision perception pipeline
 
-This directory will hold the real perception stack that replaces the
-simulator in `backend/app/simulator.py`:
+Standalone OpenCV perception stack (Phase 3). It runs and tests **without
+FastAPI** — the backend wiring is added in a later phase.
 
 ```
-Camera (OpenCV capture)
-  → Object detection (YOLO / ONNX Runtime)
-  → Pose + hand detection (MediaPipe / YOLO pose)
-  → Feature extraction
-  → Activity recognition (rule-based → temporal ML, e.g. LSTM)
-  → Detection(activity, confidence, ts)   ← the backend seam
+Camera / NullSource (OpenCV capture)
+  → BaseDetector.detect(frame)
+      mock            synthetic, deterministic (no model)
+      yolo            YOLOv8 ONNX via cv2.dnn (weights in ../models/yolo)
+  → ObjectDetection list + annotated frame
+  → CLI preview / console output
 ```
 
-## The contract
+## Quick start
 
-Everything downstream only depends on the `Detection` object
-(`backend/app/schemas.py`), the same shape the simulator already emits:
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+
+.\.venv\Scripts\python.exe -m pytest                    # 39 tests
+.\.venv\Scripts\python.exe -m pipeline.cli --detector mock               # live preview (webcam)
+.\.venv\Scripts\python.exe -m pipeline.cli --detector mock --source null  # demo, no webcam
+.\.venv\Scripts\python.exe -m pipeline.cli --detector mock --headless --print-detections
+```
+
+## The detector interface
+
+`pipeline/base.py:BaseDetector` — implement `detect(frame, timestamp_ms=None)
+-> list[ObjectDetection]`. Every detector returns the same structure, so the
+pipeline, preview, and the future backend seam stay detector-agnostic:
 
 ```json
-{ "activity": "PICK_RED_BOX", "confidence": 0.93, "ts": 1725000000000 }
+{
+  "class_name": "red_box",
+  "confidence": 0.93,
+  "bounding_box": [412, 188, 96, 74],
+  "timestamp": 1725000000000
+}
 ```
 
-The state machine (`backend/app/state_machine.py`) classifies the activity
-against the configurable experiment sequence. **Perception never decides
-validity; the state machine does.**
+| Module          | Purpose                                                     |
+| --------------- | ----------------------------------------------------------- |
+| `detections.py` | `Box`, `ObjectDetection` + JSON contract                    |
+| `base.py`       | `BaseDetector` interface                                    |
+| `mock.py`       | `MockDetector` — synthetic person/experiment_box/red_box/yellow_box/target_area; no model needed |
+| `yolo.py`       | `YoloDetector` — YOLOv8 ONNX via `cv2.dnn`, letterboxing, class-aware NMS, no auto-download |
+| `webcam.py`     | `FrameSource`, `WebcamSource` (camera), `NullSource` (synthetic frames) |
+| `annotate.py`   | `draw_detections` — boxes + labels on a *copy* of the frame |
+| `pipeline.py`   | `CameraPipeline` — source → detector → annotate → callback loop |
+| `cli.py`        | preview window / JSON-lines CLI (independent of the backend) |
 
-## Implementation phases (later)
+## YOLO detector
 
-1. Rule-based baseline (location + presence of objects governs PICK/PLACE).
-2. Temporal ML wrapper (sliding window over detection confidence streams).
+- Weights: drop an ONNX export into `models/yolo/` (see `models/README.md`).
+  Nothing is downloaded automatically — `YoloDetector.load()` raises a clear
+  `FileNotFoundError` when weights are missing.
+- Default classes: `person, experiment_box, red_box, yellow_box, target_area`.
+- Post-processes both `(1, 4+C, N)` and `(1, N, 4+C)` exports; letterbox
+  resizing; class-aware NMS.
 
-Nothing in here is required for the current prototype — see phase notes in
-`docs/ARCHITECTURE.md`.
+## Next phase
+
+Map `ObjectDetection` streams into the `Detection(activity, confidence, ts)`
+contract consumed by `backend/app/state_machine.py` (Phase 4 onwards), then
+swap `backend/app/simulator.py` for the camera pipeline.
