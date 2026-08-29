@@ -13,6 +13,10 @@ Camera:
     POST /api/camera/stop      stop and release the device
     GET  /api/camera/stream    MJPEG multipart stream (browser <img>)
     GET  /api/camera/snapshot  single JPEG frame
+
+Detection (Phase 3, off by default — DETECTION_ENABLED=true):
+    GET /api/detection/status  detector health (enabled, model, inference)
+    GET /api/detections        latest structured detections + frame size
 """
 
 import logging
@@ -26,6 +30,7 @@ from fastapi.responses import Response, StreamingResponse
 from camera import CameraManager, CameraSettings
 
 from . import config
+from .detection_service import DetectionService
 from .experiment import load_active_experiment
 from .log_store import LogStore
 from .manager import ConnectionManager
@@ -51,18 +56,34 @@ def create_app(
     experiment: Optional[ExperimentDef] = None,
     sim_script: Optional[list] = None,
     camera: Optional[CameraSettings] = None,
+    detector=None,
 ) -> FastAPI:
+    """Build the FastAPI app.
+
+    ``detector`` injects a ready-made ``ai.detection`` detector (tests use a
+    mock); when omitted the app follows the ``DETECTION_*`` config env vars.
+    """
     exp = experiment or load_active_experiment()
     manager = ConnectionManager()
     store = LogStore()
     service = ExperimentService(exp, manager, store)
     simulator = SimulatedPerception(sim_script)
     camera_manager = CameraManager(camera or camera_settings_from_config())
+    detection_service = DetectionService(
+        camera_manager,
+        detector=detector,
+        enabled=config.DETECTION_ENABLED or detector is not None,
+        kind=config.DETECTION_BACKEND,
+        model_path=config.DETECTION_MODEL_PATH,
+        conf_threshold=config.DETECTION_CONF_THRESHOLD,
+        poll_ms=config.DETECTION_POLL_MS,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         yield
         await service.stop()
+        detection_service.close()
         camera_manager.close()
 
     app = FastAPI(title="BAS-AI Backend", version="0.1.0", lifespan=lifespan)
@@ -79,6 +100,7 @@ def create_app(
     app.state.service = service
     app.state.simulator = simulator
     app.state.camera_manager = camera_manager
+    app.state.detection_service = detection_service
 
     # ------------------------------------------------------------------ REST
 
@@ -151,6 +173,16 @@ def create_app(
             media_type="image/jpeg",
             headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
         )
+
+    # -------------------------------------------------------------- Detection
+
+    @app.get("/api/detection/status")
+    async def detection_status() -> dict:
+        return detection_service.status()
+
+    @app.get("/api/detections")
+    async def detections() -> dict:
+        return detection_service.latest()
 
     # ---------------------------------------------------------------- WebSocket
 

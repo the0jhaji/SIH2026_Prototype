@@ -32,3 +32,12 @@ CAMERA_HEIGHT = int(os.environ.get("CAMERA_HEIGHT", "720"))
 CAMERA_FPS = int(os.environ.get("CAMERA_FPS", "30"))
 CAMERA_MOCK = _env_bool("CAMERA_MOCK")
 CAMERA_JPEG_QUALITY = int(os.environ.get("CAMERA_JPEG_QUALITY", "70"))
+
+# Object detection (Phase 3). OFF by default so the app boots without any
+# model weights. Enable with DETECTION_ENABLED=true and pick the backend with
+# DETECTION_BACKEND=mock|yolo.
+DETECTION_ENABLED = _env_bool("DETECTION_ENABLED")
+DETECTION_BACKEND = os.environ.get("DETECTION_BACKEND", "mock").strip().lower()
+DETECTION_MODEL_PATH = os.environ.get("DETECTION_MODEL_PATH", "detection/yolov8n.onnx")
+DETECTION_CONF_THRESHOLD = float(os.environ.get("DETECTION_CONF_THRESHOLD", "0.5"))
+DETECTION_POLL_MS = int(os.environ.get("DETECTION_POLL_MS", "100"))

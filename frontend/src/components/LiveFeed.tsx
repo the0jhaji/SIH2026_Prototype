@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { CLASS_COLOR, type Detection } from '../domain/detection'
 import { expectedStep, stepForActivity } from '../domain/experiment'
 import type { ExperimentState, ObjectKind, StepDef } from '../domain/types'
 import { formatClock } from '../lib/time'
@@ -372,7 +373,18 @@ export function SimulatedFeed({ state }: { state: ExperimentState }) {
 }
 
 /** Stand-in for the canvas simulation when a real camera stream is live. */
-export function LiveCameraFeed({ streamUrl }: { streamUrl: string }) {
+export function LiveCameraFeed({
+  streamUrl,
+  detections = [],
+  frameWidth = null,
+  frameHeight = null,
+}: {
+  streamUrl: string
+  detections?: Detection[]
+  frameWidth?: number | null
+  frameHeight?: number | null
+}) {
+  const showBoxes = frameWidth != null && frameHeight != null && frameWidth > 0 && frameHeight > 0
   return (
     <div className="relative overflow-hidden rounded-lg border border-slate-800 bg-slate-950">
       <img
@@ -380,6 +392,33 @@ export function LiveCameraFeed({ streamUrl }: { streamUrl: string }) {
         alt="Live camera feed"
         className="block aspect-video w-full object-cover"
       />
+      {showBoxes && (
+        <div className="pointer-events-none absolute inset-0">
+          {detections.map((d, i) => {
+            const left = (d.x1 / (frameWidth as number)) * 100
+            const top = (d.y1 / (frameHeight as number)) * 100
+            const width = ((d.x2 - d.x1) / (frameWidth as number)) * 100
+            const height = ((d.y2 - d.y1) / (frameHeight as number)) * 100
+            return (
+              <div
+                key={i}
+                className="absolute rounded border-2"
+                style={{
+                  left: `${left}%`,
+                  top: `${top}%`,
+                  width: `${width}%`,
+                  height: `${height}%`,
+                  borderColor: CLASS_COLOR[d.class_name] ?? '#38bdf8',
+                }}
+              >
+                <span className="absolute -top-5 left-0 rounded bg-black/70 px-1 py-0.5 font-mono text-[10px] font-bold tracking-wide text-slate-100">
+                  {d.class_name.replace(/_/g, ' ')} {Math.round(d.confidence * 100)}%
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      )}
       <span className="absolute left-3.5 top-3 rounded bg-black/55 px-2 py-0.5 font-mono text-[11px] font-bold tracking-wide text-slate-200">
         CAM-01 · LIVE FEED
       </span>
@@ -390,12 +429,25 @@ export function LiveCameraFeed({ streamUrl }: { streamUrl: string }) {
 export function LiveFeed({
   state,
   streamUrl,
+  detections = [],
+  frameWidth = null,
+  frameHeight = null,
 }: {
   state: ExperimentState
   streamUrl?: string | null
+  detections?: Detection[]
+  frameWidth?: number | null
+  frameHeight?: number | null
 }) {
   if (streamUrl) {
-    return <LiveCameraFeed streamUrl={streamUrl} />
+    return (
+      <LiveCameraFeed
+        streamUrl={streamUrl}
+        detections={detections}
+        frameWidth={frameWidth}
+        frameHeight={frameHeight}
+      />
+    )
   }
   return <SimulatedFeed state={state} />
 }

@@ -50,6 +50,34 @@ The camera layer lives in `backend/camera/` (`capture.py`: `OpenCVCamera`,
   drive `camera_manager.mjpeg_frames()` directly
   (`backend/tests/test_camera.py`). A uvicorn smoke covers the real stream.
 
+### Detection (Phase 3)
+
+`ai/detection/` is the local object-detection layer (interface, mock, YOLO
+ONNX); `backend/app/detection_service.py` runs it against the camera feed on
+its own daemon thread and exposes `GET /api/detection/status` +
+`GET /api/detections` (camelCase payloads: `class_name`, `confidence`,
+`x1/y1/x2/y2`, `timestamp` epoch-ms, plus `frameWidth/frameHeight`). Rules:
+
+- Design rules: never auto-download weights (manual drop into
+  `models/detection/`, resolution via `resolve_weights_path`); never import
+  `ai` while detection is disabled (inert `DetectionService`, no thread);
+  missing YOLO weights / detector failures surface as an `error` in status —
+  the app must never crash over detection.
+- Mock detector is deterministic (`person 0.95`, `red_box 0.91`,
+  `yellow_box 0.89`, boxes derived from frame size) so e2e/API tests are
+  stable; `scene="empty"` yields no detections.
+- YoloDetector reuses `ai/pipeline/yolo.py` helpers (letterbox, postprocess,
+  `resolve_weights_path`); a `.names` file next to the ONNX overrides classes.
+- The DetectionService thread calls only `camera_manager.latest_capture()`
+  (frames identified by frame id) — never locked methods, never the MJPEG
+  generator; it must keep working when the camera is stopped (idle).
+- Backend/ai venvs are separate: `backend/tests/test_detection.py` imports
+  `ai` after `app.main` (which puts the repo root on `sys.path`);
+  `ai/tests/test_detection.py` runs under `ai/.venv` (root inserted via
+  `ai/conftest.py`).
+- A generic pretrained YOLO does **not** recognise the BAS-AI classes; keep
+  that limitation honest in docs and status.
+
 ### Frontend (`frontend/`)
 
 ```powershell
@@ -62,7 +90,7 @@ npm run test:reducer     # state-machine parity test (Node type-stripping)
 ### AI / perception (`ai/`, venv at `ai/.venv`)
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest                       # run tests (69)
+.\.venv\Scripts\python.exe -m pytest                       # run tests (80)
 .\.venv\Scripts\python.exe -m pipeline.cli --detector mock --source null   # headless demo
 .\.venv\Scripts\python.exe -m pipeline.cli --detector mock                # live preview
 .\.venv\Scripts\python.exe -m pipeline.cli --detector yolo                # needs models/yolo/*.onnx

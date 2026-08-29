@@ -23,7 +23,7 @@ Camera / NullSource (OpenCV capture)
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
 
-.\.venv\Scripts\python.exe -m pytest                    # 69 tests
+.\.venv\Scripts\python.exe -m pytest                    # 80 tests
 .\.venv\Scripts\python.exe -m pipeline.cli --detector mock               # live preview (webcam)
 .\.venv\Scripts\python.exe -m pipeline.cli --detector mock --source null  # demo, no webcam
 .\.venv\Scripts\python.exe -m pipeline.cli --detector mock --headless --print-detections
@@ -104,6 +104,36 @@ load are lazy — the whole stack (including all tests) runs without MediaPipe;
 - Default classes: `person, experiment_box, red_box, yellow_box, target_area`.
 - Post-processes both `(1, 4+C, N)` and `(1, N, 4+C)` exports; letterbox
   resizing; class-aware NMS.
+
+## Backend detection layer (`detection/`)
+
+`detection/` is the **Phase 3 glue**: a small, self-contained contract that
+the FastAPI backend drives (`backend/app/detection_service.py` runs it on the
+camera feed). Where the pipeline detects for the *demo/hand* stack, this layer
+detects for the *dashboard* — same spirit, pixel-space boxes:
+
+```json
+{
+  "class_name": "red_box",
+  "confidence": 0.91,
+  "x1": 204, "y1": 345,
+  "x2": 332, "y2": 431,
+  "timestamp": 1725000000000
+}
+```
+
+| Module | Purpose |
+| --- | --- |
+| `types.py` | `Detection` (frozen, `x1/y1/x2/y2`, `to_dict`, epoch-ms `timestamp`) + `DetectorStatus` |
+| `detector.py` | `BaseDetector` interface + `create_detector(kind, ...)` factory |
+| `mock_detector.py` | deterministic mock — `person 0.95 / red_box 0.91 / yellow_box 0.89`, boxes scale with frame size, `scene="empty"` yields none |
+| `yolo_detector.py` | ONNX via `cv2.dnn`, reuses the pipeline's `letterbox` / `postprocess_yolov8` / `resolve_weights_path`; optional `.names` file overrides classes |
+
+`YoloDetector` defaults to `detection/yolov8n.onnx` (i.e. `models/detection/`,
+see that README for the generic-pretrained-model limitation). Tests:
+`tests/test_detection.py`. `ai/__init__.py` + `conftest.py` let the backend
+import this package (`import ai.detection`) while `ai/.venv` pytest keeps
+importing `pipeline.*` / `detection.*` directly.
 
 ## Next phase
 

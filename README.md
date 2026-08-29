@@ -124,6 +124,55 @@ $env:CAMERA_JPEG_QUALITY="70"
 synthetic animated frame so the whole dashboard (stream, status, controls)
 works with no webcam at all — used by the test suite too.
 
+## How object detection works (Phase 3)
+
+Local, offline, **optional**. On top of the camera feed, the backend runs a
+detector thread that classifies each new frame and delivers the boxes over
+REST; the dashboard draws a "Detected Objects" panel and live bounding-box
+overlay on the video feed. Enabling it never changes the camera/MJPEG path —
+with detection off the app behaves exactly as in Phase 2.
+
+```
+CameraManager (capture thread)──latest_capture()──► DetectionService (daemon thread)
+   └─ MJPEG ─► dashboard <img>                           └─ ai/detection/ BaseDetector
+                                                              mock  → deterministic person/red_box/yellow_box
+                                                              yolo  → YOLOv8 ONNX (models/detection/)
+   REST ── GET /api/detection/status ──► dashboard panel + overlays
+                 GET /api/detections
+```
+
+Enable by restarting the backend with env vars (`backend/app/config.py`):
+
+```bash
+$env:DETECTION_ENABLED="true"
+$env:DETECTION_BACKEND="mock"                # mock (no weights) or yolo
+$env:DETECTION_MODEL_PATH="detection/yolov8n.onnx"   # default; see models/detection/README.md
+$env:DETECTION_CONF_THRESHOLD="0.5"
+$env:DETECTION_POLL_MS="100"
+```
+
+- **`mock`** — no weights, ready to demo: deterministic `person 0.95` /
+  `red_box 0.91` / `yellow_box 0.89` boxes derived from the frame size.
+- **`yolo`** — runs a YOLOv8 ONNX model via `cv2.dnn` (CPU, CUDA-capable).
+  Missing weights → a *clear error* in `/api/detection/status`
+  (`modelLoaded: false` + message) — **never a crash, never a download**.
+  ⚠️ A generic pretrained YOLO does **not** recognise
+  `experiment_box`/`red_box`/`yellow_box`/`target_area`; a custom-trained
+  5-class model (or a `.names` file) is required for real detection — see
+  `models/detection/README.md`.
+
+Endpoints:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/detection/status` | enabled, detector type, model loaded, inference status, last inference, count, error |
+| `GET /api/detections` | latest structured detections + source frame size (`503`-free; empty when idle/disabled) |
+
+The **Object Detection** dashboard panel shows detector/model/inference state
+and the live object list; boxes are drawn on the live feed using percentages
+of the reported frame size. With detection disabled the panel shows an honest
+"detection off" state and how to enable it.
+
 **Testing the stream** (backend running):
 
 ```bash

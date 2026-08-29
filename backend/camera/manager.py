@@ -92,6 +92,15 @@ class CameraManager:
         with self._lock:
             return self._context[1] if self._context is not None else None
 
+    def latest_capture(self) -> tuple[int, np.ndarray] | None:
+        """``(frame_id, last BGR frame)`` tuple, or ``None`` while idle.
+
+        Side-car consumers (object detection) poll this to run only on new
+        frames instead of the shared latest frame.
+        """
+        with self._lock:
+            return (self._context[0], self._context[1]) if self._context is not None else None
+
     def latest_jpeg(self) -> tuple[int, bytes] | None:
         with self._lock:
             return (self._context[0], self._context[2]) if self._context is not None else None

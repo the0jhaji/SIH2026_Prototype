@@ -1,17 +1,21 @@
 import { CAMERA_STREAM_URL } from './domain/camera'
 import { CameraPanel } from './components/CameraPanel'
+import { DetectionPanel } from './components/DetectionPanel'
 import { EventLog } from './components/EventLog'
 import { Header } from './components/Header'
 import { LiveFeed } from './components/LiveFeed'
 import { StatusPanel } from './components/StatusPanel'
 import { StepChecklist } from './components/StepChecklist'
 import { useCamera } from './hooks/useCamera'
+import { useDetection } from './hooks/useDetection'
 import { useExperiment } from './hooks/useExperiment'
 
 export default function App() {
   const { state, mode, connected, busy, start, stop, setMode } = useExperiment()
   const camera = useCamera(mode)
+  const detection = useDetection(mode)
   const streamUrl = camera.info?.running ? CAMERA_STREAM_URL : null
+  const cameraRunning = camera.info?.running === true
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200">
@@ -26,7 +30,13 @@ export default function App() {
       />
       <main className="mx-auto grid max-w-7xl grid-cols-1 gap-4 p-4 xl:grid-cols-3">
         <section className="space-y-4 xl:col-span-2">
-          <LiveFeed state={state} streamUrl={streamUrl} />
+          <LiveFeed
+            state={state}
+            streamUrl={streamUrl}
+            detections={cameraRunning ? detection.result?.detections : []}
+            frameWidth={cameraRunning ? detection.result?.frameWidth ?? null : null}
+            frameHeight={cameraRunning ? detection.result?.frameHeight ?? null : null}
+          />
           <CameraPanel
             mode={mode}
             info={camera.info}
@@ -39,6 +49,12 @@ export default function App() {
         <div className="space-y-4">
           <StatusPanel state={state} />
           <StepChecklist state={state} />
+          <DetectionPanel
+            status={detection.status}
+            result={detection.result}
+            offline={detection.offline}
+            cameraRunning={cameraRunning}
+          />
         </div>
         <section className="xl:col-span-3">
           <EventLog events={state.log} />

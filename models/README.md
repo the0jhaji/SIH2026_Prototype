@@ -8,13 +8,13 @@ auto-downloaded. Place exported files here by hand.
 | Directory    | Contents                                              |
 | ------------ | ----------------------------------------------------- |
 | `yolo/`      | YOLO object-detection weights as **ONNX** exports (`yolov8n.onnx` by default; export a `.pt` with `yolo export model=... format=onnx`) |
+| `detection/` | ONNX weights for the backend detection layer (`ai/detection/yolo_detector.py`); default `detection/yolov8n.onnx`, optional sibling `.names` file overrides the class list — see `detection/README.md` |
 | `pose/`      | MediaPipe hand-landmark model **`hand_landmarker.task`** (used by `ai/pipeline/hand.py:MediaPipeHandTracker`; needed only for real hand tracking — the mock path needs nothing) |
 | `har/`       | temporal activity-recognition weights                  |
 
 ## How the pipeline finds weights
 
-`ai/pipeline/yolo.py` and `ai/pipeline/hand.py` resolve a model in this
-order:
+Resolution order for every module:
 
 1. absolute path, else
 2. `$BAS_MODELS_DIR/<name>`, else
