@@ -1,4 +1,4 @@
-import { expectedStep, stepForActivity } from './experiment'
+import { expectedStep, stepForActivity } from './experiment.ts'
 import type {
   BasEvent,
   Detection,
@@ -6,7 +6,8 @@ import type {
   EventSeverity,
   ExperimentDef,
   ExperimentState,
-} from './types'
+  StepDef,
+} from './types.ts'
 
 export const CONFIDENCE_THRESHOLD = 0.5
 export const LOG_LIMIT = 400
@@ -61,6 +62,17 @@ export function createInitialState(experiment: ExperimentDef): ExperimentState {
 }
 
 type EventPatch = Omit<BasEvent, 'seq' | 'ts' | 'severity'>
+
+/**
+ * Spoken instruction in natural prose, e.g. label "Pick RED box" becomes
+ * "Please pick the red box."
+ */
+function voiceInstruction(step: StepDef | undefined, fallback: string): string {
+  if (!step) return `${fallback}.`
+  const [verb, ...rest] = step.label.split(' ')
+  const object = rest.join(' ').toLowerCase()
+  return `Please ${verb.toLowerCase()} the ${object || 'next step'}.`
+}
 
 function append(state: ExperimentState, patch: EventPatch): ExperimentState {
   const event: BasEvent = {
@@ -131,7 +143,7 @@ export function handleDetection(state: ExperimentState, detection: Detection): E
       activity: detection.activity ?? undefined,
       confidence: detection.confidence,
       expected: expected?.activity,
-      voice: `I could not clearly see that action. Please ${expectedLabel}.`,
+      voice: `I could not clearly see that action. ${voiceInstruction(expected, 'Please repeat the action')}`,
     })
     return { ...s, errors: { ...s.errors, lowConfidence: s.errors.lowConfidence + 1 } }
   }
@@ -143,7 +155,7 @@ export function handleDetection(state: ExperimentState, detection: Detection): E
       activity: detection.activity ?? undefined,
       confidence: detection.confidence,
       expected: expected?.activity,
-      voice: `I do not recognize that action. Please ${expectedLabel}.`,
+      voice: `I do not recognize that action. ${voiceInstruction(expected, 'Please repeat the action')}`,
     })
     return { ...s, errors: { ...s.errors, unknown: s.errors.unknown + 1 } }
   }
@@ -174,30 +186,32 @@ export function handleDetection(state: ExperimentState, detection: Detection): E
       activity: detection.activity,
       confidence: detection.confidence,
       expected: expected?.activity,
-      voice: `That action was already completed. Please ${expectedLabel}.`,
+      voice: `That action was already completed. ${voiceInstruction(expected, 'Please continue')}`,
     })
     return { ...s, errors: { ...s.errors, repeated: s.errors.repeated + 1 } }
   }
 
   // A known activity belonging to a later step: out of sequence, and the
-  // expected step was consequently skipped.
-  s = append(s, {
+  // expected step was consequently skipped. The out-of-sequence event is the
+  // primary classification; the skip advisory is secondary.
+  const oos = append(s, {
     kind: 'OUT_OF_SEQUENCE',
     message: `Out of sequence: ${detection.activity} while expected ${expected?.activity ?? 'unknown'}.`,
     activity: detection.activity,
     confidence: detection.confidence,
     expected: expected?.activity,
-    voice: `Incorrect sequence. Please ${expectedLabel}.`,
+    voice: `Incorrect sequence. ${voiceInstruction(expected, 'Please follow the sequence')}`,
   })
-  s = append(s, {
+  s = append(oos, {
     kind: 'SKIPPED_STEP',
     message: `Skipped step detected: ${expectedLabel} was not performed.`,
     expected: expected?.activity,
     stepId: expected?.id,
-    voice: `Please ${expectedLabel}.`,
+    voice: voiceInstruction(expected, 'Please follow the sequence'),
   })
   return {
     ...s,
+    lastClassification: oos.lastClassification,
     errors: {
       ...s.errors,
       outOfSequence: s.errors.outOfSequence + 1,

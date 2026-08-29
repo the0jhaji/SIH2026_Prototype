@@ -1,4 +1,4 @@
-import type { ActivityId, ExperimentDef, StepDef } from './types'
+import type { ActivityId, ExperimentDef, StepDef } from './types.ts'
 
 /**
  * Initial controlled experiment (SIH 2026 PS 26174):

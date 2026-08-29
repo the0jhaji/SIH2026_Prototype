@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Backend (later phases)
+backend/__pycache__/
+backend/.venv/
+backend/venv/
+*.pyc
+
+# Recordings / local data (later phases)
+recordings/
+data/
+*.mp4
+
+# Environment & OS
+.env
+.env.*
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

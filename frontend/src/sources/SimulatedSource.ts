@@ -56,9 +56,9 @@ const SCRIPT: ScriptedDetection[] = [
   { delayMs: 2200, activity: 'PICK_YELLOW_BOX', confidence: 0.88 },
   { delayMs: 2200, activity: 'PICK_RED_BOX', confidence: 0.93 },
   { delayMs: 2200, activity: 'PLACE_RED_BOX', confidence: 0.9 },
-  { delayMs: 2200, activity: 'PICK_RED_BOX', confidence: 0.89 },
+  { delayMs: 2200, activity: 'PLACE_YELLOW_BOX', confidence: 0.89 },
+  { delayMs: 2200, activity: 'PICK_RED_BOX', confidence: 0.87 },
   { delayMs: 2200, activity: 'WRITING_ON_SURFACE', confidence: 0.72 },
   { delayMs: 2200, activity: 'PICK_YELLOW_BOX', confidence: 0.95 },
-  { delayMs: 2200, activity: 'PLACE_RED_BOX', confidence: 0.86 },
   { delayMs: 2200, activity: 'PLACE_YELLOW_BOX', confidence: 0.94 },
 ]

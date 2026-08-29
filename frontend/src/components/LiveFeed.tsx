@@ -156,7 +156,9 @@ function hasAction(list: StepDef[], action: StepDef['action'], completed: string
 export function LiveFeed({ state }: { state: ExperimentState }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const stateRef = useRef(state)
-  stateRef.current = state
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
 
   useEffect(() => {
     const canvas = canvasRef.current
