@@ -42,15 +42,27 @@ npm run test:reducer     # state-machine parity test (Node type-stripping)
 ### AI / perception (`ai/`, venv at `ai/.venv`)
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest                       # run tests (39)
+.\.venv\Scripts\python.exe -m pytest                       # run tests (69)
 .\.venv\Scripts\python.exe -m pipeline.cli --detector mock --source null   # headless demo
 .\.venv\Scripts\python.exe -m pipeline.cli --detector mock                # live preview
 .\.venv\Scripts\python.exe -m pipeline.cli --detector yolo                # needs models/yolo/*.onnx
+.\.venv\Scripts\python.exe -m pipeline.cli --interaction --headless --print-detections   # hand⇄object event chain
 ```
 
 The `ai/` package is independent of FastAPI by design. Change
 `ai/pipeline/base.py:BaseDetector` semantics → update `ai/tests/`. Never
-auto-download model weights; drop them into `models/yolo/` manually.
+auto-download model weights; drop them into `models/yolo/` (ONNX) and
+`models/pose/` (`hand_landmarker.task` for MediaPipe) manually.
+
+`ai/pipeline/interaction/` produces only **perception observations**
+(`HAND_NEAR_*`, `*_MOVED`, `*_PLACED`) — temporal spatial facts, never
+activity/step-validity claims. Proximity alone must never emit `*_MOVED` /
+`*_PLACED`; those require consecutive-frame motion and (for PLACED) settling
+inside the `target_area`. `MediaPipeHandTracker` is lazy-imported (the
+`mediapipe-tasks` wheel does not exist for Python 3.14); tests use
+`MockHandTracker`. When changing interaction semantics, keep
+`tests/test_interaction_tracker.py` and `tests/test_interaction_scene.py` in
+agreement.
 
 **Always run `npm run lint` and `npm run build` after frontend changes, and
 `python -m pytest` after backend changes.** Run `ai` pytest after `ai/`

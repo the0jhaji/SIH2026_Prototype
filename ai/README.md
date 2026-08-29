@@ -1,7 +1,10 @@
 # ai/ — Local computer-vision perception pipeline
 
 Standalone OpenCV perception stack (Phase 3). It runs and tests **without
-FastAPI** — the backend wiring is added in a later phase.
+FastAPI** — the backend wiring is added in a later phase. Phase 4 adds the
+hand/object interaction module (`pipeline/interaction/`) that produces
+temporal hand⇄object observations from the same detections plus hand
+landmarks.
 
 ```
 Camera / NullSource (OpenCV capture)
@@ -9,6 +12,8 @@ Camera / NullSource (OpenCV capture)
       mock            synthetic, deterministic (no model)
       yolo            YOLOv8 ONNX via cv2.dnn (weights in ../models/yolo)
   → ObjectDetection list + annotated frame
+  → BaseHandTracker.track(frame)      (mock synthetic / MediaPipe local)
+  → InteractionTracker.update()       HAND_NEAR / MOVED / PLACED events
   → CLI preview / console output
 ```
 
@@ -18,10 +23,11 @@ Camera / NullSource (OpenCV capture)
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
 
-.\.venv\Scripts\python.exe -m pytest                    # 39 tests
+.\.venv\Scripts\python.exe -m pytest                    # 69 tests
 .\.venv\Scripts\python.exe -m pipeline.cli --detector mock               # live preview (webcam)
 .\.venv\Scripts\python.exe -m pipeline.cli --detector mock --source null  # demo, no webcam
 .\.venv\Scripts\python.exe -m pipeline.cli --detector mock --headless --print-detections
+.\.venv\Scripts\python.exe -m pipeline.cli --interaction --headless --print-detections  # demo interaction chain
 ```
 
 ## The detector interface
@@ -46,9 +52,49 @@ pipeline, preview, and the future backend seam stay detector-agnostic:
 | `mock.py`       | `MockDetector` — synthetic person/experiment_box/red_box/yellow_box/target_area; no model needed |
 | `yolo.py`       | `YoloDetector` — YOLOv8 ONNX via `cv2.dnn`, letterboxing, class-aware NMS, no auto-download |
 | `webcam.py`     | `FrameSource`, `WebcamSource` (camera), `NullSource` (synthetic frames) |
+| `hand.py`       | 21-keypoint hand landmarks: `BaseHandTracker` / `MockHandTracker` / lazy `MediaPipeHandTracker` (weights in `../models/pose`) |
 | `annotate.py`   | `draw_detections` — boxes + labels on a *copy* of the frame |
 | `pipeline.py`   | `CameraPipeline` — source → detector → annotate → callback loop |
 | `cli.py`        | preview window / JSON-lines CLI (independent of the backend) |
+
+## Hand/object interaction (Phase 4)
+
+`pipeline/interaction/` turns per-frame object detections + hand landmarks
+into honest low-level observations. It is a **perception** module — it never
+classifies an activity and never makes a step-validity decision (that stays
+exclusively with `backend/app/state_machine.py`).
+
+| Module        | Purpose                                                      |
+| ------------- | ------------------------------------------------------------ |
+| `events.py`   | `InteractionEvent` + the six event names below               |
+| `geometry.py` | `hand_proximity`, `object_diagonal`, `centre_inside_box` (pure, no state) |
+| `tracker.py`  | `InteractionTracker.update(detections, hands, frame_size, timestamp) -> list[InteractionEvent]` — object/hand continuity, temporal moving↔stable state |
+| `demo.py`     | `MockScene` + `make_hand` — deterministic demo driving the full chain; re-projects authored 1280×720 coordinates to the frame size |
+
+Event semantics (events carry `name`, `object`, `confidence`, `timestamp`,
+`hand_id`, `distance_px`, `displacement_px`, `in_target_area`):
+
+- `HAND_NEAR_RED` / `HAND_NEAR_YELLOW` — a hand is within `near_mult` × object
+  diagonal of the box centre. **Observational only**; emitted on enter
+  transitions (debounced).
+- `RED_MOVED` / `YELLOW_MOVED` — the object's centre displaced more than
+  `move_mult` × object diagonal for `min_move_frames` (2) consecutive frames.
+  Proximity alone never fires it; jumps across detection gaps don't count.
+- `RED_PLACED` / `YELLOW_PLACED` — after a confirmed move episode, the object
+  came to rest (`settle_frames` consecutive frames within `settle_mult`) **and**
+  its centre is inside the target area (bloated by `target_margin`). An object
+  already resting at its target is *not* "placed".
+
+`InteractionConfig` defaults: `near_mult=0.90`, `move_mult=0.30`,
+`min_move_frames=2`, `settle_mult=0.10`, `settle_frames=3`, `idle_frames=30`,
+`target_margin=0.15`, `max_assoc_distance=0.25` (fraction of frame diagonal,
+object continuity), `hand_assoc_distance=0.25` (fraction of frame diagonal,
+hand continuity).
+
+`MediaPipeHandTracker` needs `pip install mediapipe-tasks` into a supported
+Python and a `hand_landmarker.task` file in `models/pose/`. Import and model
+load are lazy — the whole stack (including all tests) runs without MediaPipe;
+`MockHandTracker` is the always-available path.
 
 ## YOLO detector
 
@@ -61,6 +107,7 @@ pipeline, preview, and the future backend seam stay detector-agnostic:
 
 ## Next phase
 
-Map `ObjectDetection` streams into the `Detection(activity, confidence, ts)`
-contract consumed by `backend/app/state_machine.py` (Phase 4 onwards), then
-swap `backend/app/simulator.py` for the camera pipeline.
+Map `ObjectDetection` + interaction-event streams into the
+`Detection(activity, confidence, ts)` contract consumed by
+`backend/app/state_machine.py`, then swap `backend/app/simulator.py` for the
+camera pipeline.

@@ -8,9 +8,12 @@ live monitoring dashboard — fully offline.
 
 This repository contains the **software prototype foundation**: a React
 dashboard, a FastAPI backend, WebSocket streaming, a configurable experiment
-simulator, and a standalone OpenCV perception pipeline (Phase 3). Real trained
-detection enters by dropping an ONNX model into `models/yolo/`. **No cloud
-services, no cloud TTS, no LLM validation.**
+simulator, an OpenCV perception pipeline with both mock and YOLO detectors, and
+a hand/object interaction module (Phase 4) that turns detections + hand
+landmarks into temporal `HAND_NEAR`/`MOVED`/`PLACED` observations. Real
+trained detection enters by dropping an ONNX model into `models/yolo/`, and
+real hand tracking by dropping `hand_landmarker.task` into `models/pose/`
+(MediaPipe Tasks). **No cloud services, no cloud TTS, no LLM validation.**
 
 ## Monorepo layout
 
@@ -18,6 +21,7 @@ services, no cloud TTS, no LLM validation.**
 frontend/   React + Vite + Tailwind dashboard
 backend/    FastAPI server (REST + WebSocket + state machine + simulator)
 ai/         OpenCV perception pipeline (mock AND YOLO detectors + webcam) — no FastAPI deps
+            + hand/object interaction module (hand.py + pipeline/interaction/)
 models/     model weights (git-ignored, never auto-downloaded)
 data/       runtime data: recordings/ and logs/ (git-ignored)
 docs/       architecture and design notes
@@ -101,11 +105,11 @@ cd frontend && npm run test:reducer
 # frontend static checks / build
 cd frontend && npm run lint && npm run build
 
-# ai (perception pipeline, mock + yolo + webcam)
+# ai (perception pipeline, mock + yolo + webcam + hand interaction)
 cd ai && python -m pytest
 ```
 
-## How to run — perception preview (Phase 3)
+## How to run — perception preview (Phase 3+)
 
 ```bash
 cd ai
@@ -113,12 +117,14 @@ cd ai
 python -m pipeline.cli --detector mock               # live webcam preview window
 python -m pipeline.cli --detector mock --source null # synthetic frames, no camera
 python -m pipeline.cli --detector mock --headless --print-detections   # JSON lines
+python -m pipeline.cli --interaction --headless --print-detections     # hand⇄object event chain
 ```
 
 `--detector yolo` runs `ai/pipeline/yolo.py` (YOLOv8 ONNX via `cv2.dnn`) once
 an exported model sits in `models/yolo/` — nothing is downloaded
-automatically. See `ai/README.md` for the detector interface and the
-`{class_name, confidence, bounding_box, timestamp}` JSON contract.
+automatically. See `ai/README.md` for the detector interface, the interaction
+module, and the `{class_name, confidence, bounding_box, timestamp}` JSON
+contract.
 
 ## How simulation works
 

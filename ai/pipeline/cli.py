@@ -16,6 +16,8 @@ import threading
 
 import cv2
 
+from .annotate import draw_detections
+from .interaction import InteractionTracker, MockScene
 from .mock import MockDetector
 from .pipeline import CameraPipeline
 from .webcam import NullSource, WebcamSource
@@ -35,11 +37,68 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-annotate", action="store_true")
     parser.add_argument("--print-detections", action="store_true", help="emit JSON lines to stdout")
     parser.add_argument("--use-cuda", action="store_true")
+    parser.add_argument(
+        "--interaction",
+        action="store_true",
+        help="drive the hand/object interaction demo (no camera, no model)",
+    )
     return parser
+
+
+def _run_interaction(args: argparse.Namespace) -> int:
+    import time
+
+    from .interaction.demo import MockScene
+
+    scene = MockScene()
+    tracker = InteractionTracker()
+    stop = threading.Event()
+    frame_size = (args.width, args.height)
+    frames = args.max_frames or 140
+    for frame_idx in range(frames):
+        if stop.is_set():
+            break
+        detections, hands = scene.step(frame_size)
+        ts = int((frame_idx + 1) * 33)
+        events = tracker.update(detections, hands, frame_size, ts)
+        if args.print_detections:
+            payload = {
+                "frame": frame_idx,
+                "timestamp": ts,
+                "detections": [d.to_dict() for d in detections],
+                "events": [e.to_dict() for e in events],
+            }
+            print(json.dumps(payload), flush=True)
+        if not args.headless:
+            canvas = draw_detections(_blank(args.width, args.height), detections)
+            for hand in hands:
+                for i in (4, 8, 12, 16, 20):
+                    lm = hand.landmarks[i]
+                    cv2.circle(
+                        canvas,
+                        (int(lm.x * args.width), int(lm.y * args.height)),
+                        4,
+                        (0, 255, 255),
+                        -1,
+                    )
+            cv2.imshow("BAS-AI interaction preview", canvas)
+            if cv2.waitKey(1) & 0xFF == 27:
+                stop.set()
+    cv2.destroyAllWindows()
+    return 0
+
+
+def _blank(width: int, height: int):
+    import numpy as np
+
+    return np.full((height, width, 3), 16, dtype=np.uint8)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    if args.interaction:
+        return _run_interaction(args)
 
     if args.source == "null":
         source: cv2.VideoCapture | object = NullSource(args.width, args.height)

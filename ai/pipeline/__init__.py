@@ -8,6 +8,8 @@ separate module added in a later phase.
 
 from .base import BaseDetector
 from .detections import Box, ObjectDetection
+from .hand import BaseHandTracker, HandLandmark, HandLandmarkSet, MockHandTracker
+from .interaction import InteractionConfig, InteractionEvent, InteractionTracker
 from .mock import MockDetector
 from .pipeline import CameraPipeline, DetectionFrame
 from .webcam import FrameSource, NullSource, WebcamSource
@@ -17,6 +19,13 @@ __all__ = [
     "BaseDetector",
     "Box",
     "ObjectDetection",
+    "BaseHandTracker",
+    "HandLandmark",
+    "HandLandmarkSet",
+    "MockHandTracker",
+    "InteractionConfig",
+    "InteractionEvent",
+    "InteractionTracker",
     "MockDetector",
     "CameraPipeline",
     "DetectionFrame",
