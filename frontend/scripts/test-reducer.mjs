@@ -61,6 +61,25 @@ const oosVoice = s.log.find(e => e.kind === 'OUT_OF_SEQUENCE')?.voice
 console.log('Voice example:', JSON.stringify(oosVoice))
 if (oosVoice !== 'Incorrect sequence. Please pick the red box.') failures.push('voice prose')
 
+const resultKinds = s.log.filter(e => e.result).map(e => e.result).join(' ')
+console.log('Results:', resultKinds)
+const expectedResults = [
+  'CORRECT',
+  'CORRECT',
+  'LOW_CONFIDENCE',
+  'OUT_OF_SEQUENCE',
+  'SKIPPED',
+  'CORRECT',
+  'CORRECT',
+  'OUT_OF_SEQUENCE',
+  'SKIPPED',
+  'REPEATED',
+  'UNKNOWN',
+  'CORRECT',
+  'CORRECT',
+]
+if (resultKinds !== expectedResults.join(' ')) failures.push('result labels mismatch')
+
 if (failures.length) {
   console.error('FAILED:', failures.join('; '))
   process.exit(1)

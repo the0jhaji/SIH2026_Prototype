@@ -6,11 +6,19 @@ import { StepChecklist } from './components/StepChecklist'
 import { useExperiment } from './hooks/useExperiment'
 
 export default function App() {
-  const { state, start, stop } = useExperiment()
+  const { state, mode, connected, busy, start, stop, setMode } = useExperiment()
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200">
-      <Header state={state} onStart={start} onStop={stop} />
+      <Header
+        state={state}
+        mode={mode}
+        connected={connected}
+        busy={busy}
+        onStart={start}
+        onStop={stop}
+        onModeChange={setMode}
+      />
       <main className="mx-auto grid max-w-7xl grid-cols-1 gap-4 p-4 xl:grid-cols-3">
         <section className="space-y-4 xl:col-span-2">
           <LiveFeed state={state} />

@@ -1,0 +1,49 @@
+{
+  "id": "bas-box-sequence-01",
+  "name": "BAS Box Sequence",
+  "description": "Pick the main experiment box, open it, then pick and place the RED and YELLOW boxes into the target area.",
+  "steps": [
+    {
+      "id": "s1",
+      "activity": "PICK_MAIN_BOX",
+      "label": "Pick main experiment box",
+      "action": "PICK",
+      "object": "MAIN_BOX"
+    },
+    {
+      "id": "s2",
+      "activity": "OPEN_EXPERIMENT_BOX",
+      "label": "Open experiment box",
+      "action": "OPEN",
+      "object": "MAIN_BOX"
+    },
+    {
+      "id": "s3",
+      "activity": "PICK_RED_BOX",
+      "label": "Pick RED box",
+      "action": "PICK",
+      "object": "RED_BOX"
+    },
+    {
+      "id": "s4",
+      "activity": "PLACE_RED_BOX",
+      "label": "Place RED box in target area",
+      "action": "PLACE",
+      "object": "RED_BOX"
+    },
+    {
+      "id": "s5",
+      "activity": "PICK_YELLOW_BOX",
+      "label": "Pick YELLOW box",
+      "action": "PICK",
+      "object": "YELLOW_BOX"
+    },
+    {
+      "id": "s6",
+      "activity": "PLACE_YELLOW_BOX",
+      "label": "Place YELLOW box in target area",
+      "action": "PLACE",
+      "object": "YELLOW_BOX"
+    }
+  ]
+}

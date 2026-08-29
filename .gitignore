@@ -5,15 +5,26 @@ node_modules/
 dist/
 *.tsbuildinfo
 
-# Backend (later phases)
-backend/__pycache__/
+# Python
 backend/.venv/
 backend/venv/
+__pycache__/
 *.pyc
+.pytest_cache/
 
-# Recordings / local data (later phases)
+# Model weights (never commit binaries)
+models/*.pt
+models/*.onnx
+models/*.bin
+models/*.engine
+models/**/*.pt
+models/**/*.onnx
+
+# Runtime data
+data/**
+!data/.gitkeep
+!data/**/.gitkeep
 recordings/
-data/
 *.mp4
 
 # Environment & OS

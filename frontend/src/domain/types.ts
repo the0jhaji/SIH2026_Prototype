@@ -46,6 +46,15 @@ export type EventKind =
 
 export type EventSeverity = 'info' | 'ok' | 'warn' | 'error'
 
+/** Short classification result for a validated detection (backend source of truth). */
+export type ClassificationResult =
+  | 'CORRECT'
+  | 'OUT_OF_SEQUENCE'
+  | 'SKIPPED'
+  | 'REPEATED'
+  | 'UNKNOWN'
+  | 'LOW_CONFIDENCE'
+
 export interface BasEvent {
   seq: number
   /** Epoch milliseconds. */
@@ -59,6 +68,8 @@ export interface BasEvent {
   /** Message handed to the (offline) TTS layer in Phase 9. */
   voice?: string
   stepId?: StepId
+  /** Present on classification events only. */
+  result?: ClassificationResult
 }
 
 /**

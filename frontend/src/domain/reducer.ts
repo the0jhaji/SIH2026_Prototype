@@ -1,6 +1,7 @@
 import { expectedStep, stepForActivity } from './experiment.ts'
 import type {
   BasEvent,
+  ClassificationResult,
   Detection,
   EventKind,
   EventSeverity,
@@ -20,6 +21,21 @@ const CLASSIFICATION_KINDS: ReadonlySet<EventKind> = new Set([
   'UNKNOWN_ACTIVITY',
   'LOW_CONFIDENCE',
 ])
+
+/** Short result labels mirroring backend/app/state_machine.py. */
+const RESULT_BY_KIND: Record<EventKind, ClassificationResult | undefined> = {
+  STEP_MATCHED: 'CORRECT',
+  OUT_OF_SEQUENCE: 'OUT_OF_SEQUENCE',
+  SKIPPED_STEP: 'SKIPPED',
+  REPEATED_STEP: 'REPEATED',
+  UNKNOWN_ACTIVITY: 'UNKNOWN',
+  LOW_CONFIDENCE: 'LOW_CONFIDENCE',
+  EXPERIMENT_STARTED: undefined,
+  EXPERIMENT_STOPPED: undefined,
+  EXPERIMENT_COMPLETED: undefined,
+  RECORDING_STARTED: undefined,
+  RECORDING_STOPPED: undefined,
+}
 
 /** Severity drives the colouring used across the dashboard and log. */
 export function severityOf(kind: EventKind): EventSeverity {
@@ -79,6 +95,7 @@ function append(state: ExperimentState, patch: EventPatch): ExperimentState {
     seq: state.seq + 1,
     ts: Date.now(),
     severity: severityOf(patch.kind),
+    result: RESULT_BY_KIND[patch.kind],
     ...patch,
   }
   const log = [...state.log, event]

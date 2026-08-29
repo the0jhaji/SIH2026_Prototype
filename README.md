@@ -1,117 +1,130 @@
 # BAS-AI — SIH 2026 PS 26174
 
-Offline AI-based Human Activity Recognition for on-board experiment assistance on
-Bharatiya Antariksh Station (BAS). The system watches a fixed camera feed,
-recognizes predefined experiment activities against a **configurable** step
-sequence, validates order, guides the operator, detects errors, issues voice
-alerts, logs timestamped events, and records video locally.
+Offline AI-based **Human Activity Recognition** for on-board experiment
+assistance on Bharatiya Antariksh Station (BAS). A fixed camera watches the
+operator, the system recognises predefined experiment activities against a
+**configurable** sequence, validates their order, detects errors, and drives a
+live monitoring dashboard — fully offline.
 
-This is an **SIH prototype**, not flight-qualified software. Reliability over
-fancy UI.
+This repository contains the **software prototype foundation**: a React
+dashboard, a FastAPI backend, WebSocket streaming and a configurable
+experiment simulator. Real AI perception (CV / YOLO / pose) comes in later
+phases. **No cloud services, no cloud TTS, no LLM validation.**
 
-## Core rule
-
-The deployed system **must work fully offline**:
-
-- No cloud APIs, no OpenAI/Gemini/Claude, no cloud DBs, no cloud TTS.
-- All inference, validation, logging and speech stay on the local machine.
-
-## Design principle
-
-**Perception is separated from decision-making.**
-
-- Perception: *"What action is happening?"* → a `Detection` (`activity`, `confidence`).
-- State machine: *"Is this action valid now?"* → a classified `Event`
-  (`STEP_MATCHED`, `OUT_OF_SEQUENCE`, `SKIPPED_STEP`, `REPEATED_STEP`,
-  `UNKNOWN_ACTIVITY`, `LOW_CONFIDENCE`).
-
-No LLM is ever used as the mission-critical sequence validator.
-
-## Repository layout
+## Monorepo layout
 
 ```
-frontend/   React + Vite + Tailwind dashboard (Phase 1 complete)
-backend/    FastAPI + WebSocket + SQLite (Phase 2) — planned
-ml/         OpenCV / YOLO / MediaPipe perception pipeline — planned
+frontend/   React + Vite + Tailwind dashboard
+backend/    FastAPI server (REST + WebSocket + state machine + simulator)
+ai/         perception pipeline (planned: OpenCV → YOLO → Pose → HAR)
+models/     model weights (git-ignored, not committed)
+data/       runtime data: recordings/ and logs/ (git-ignored)
+docs/       architecture and design notes
 ```
 
-The perception → state-machine flow is already wired end-to-end using a
-**simulated** perception source, so the dashboard, reducer, event model and
-logs are identical to what the real pipeline will feed in later phases.
+## Architecture in one breath
 
-## Current status
+```
+Simulator (scripted detections)          — future: OpenCV/YOLO/pose pipeline
+   │  Detection {activity, confidence, ts}
+   ▼
+Experiment state machine (backend)       — the ONLY authority on step validity
+   │  classified Events
+   ▼
+WebSocket (/ws) ──state snapshots──► React dashboard (real-time updates)
+REST           ──start/stop/status/logs
+```
 
-| Phase | Goal | Status |
-|-------|------|--------|
-| 1 | React dashboard with simulated activity events | done |
-| 2 | FastAPI backend + WebSocket | next |
-| 3 | Experiment state machine (server side) | modelled in `domain/reducer.ts` |
-| 4–11 | OpenCV, detection, pose, recognition, voice, recording, packaging | planned |
+**Perception asks "what is happening?"; the state machine asks "is it valid
+now?".** They never mix.
 
-## Running the dashboard (Phase 1)
+## Setup
+
+Requirements: Node ≥ 22, Python ≥ 3.12.
+
+### Backend
+
+```bash
+cd backend
+python -m venv .venv
+.\.venv\Scripts\activate            # Windows (PowerShell)
+source .venv/bin/activate           # macOS / Linux
+pip install -r requirements-dev.txt
+```
+
+### Frontend
 
 ```bash
 cd frontend
 npm install
-npm run dev
 ```
 
-Then open http://localhost:5173 and press **Start experiment**. A scripted
-simulation replays the initial experiment (pick main box → open → pick/place
-RED → pick/place YELLOW) and deliberately injects every supported error type:
+## How to run — backend
 
-- out-of-sequence (picks YELLOW when RED was expected)
-- skipped step advisory
-- repeated step
-- unknown activity
-- low-confidence detection
-
-## Initial experiment (configurable)
-
-1. Pick main experiment box
-2. Open experiment box
-3. Pick RED box
-4. Place RED box in target area
-5. Pick YELLOW box
-6. Place YELLOW box in target area
-
-The sequence is plain data in `frontend/src/domain/experiment.ts` — no code
-changes needed to reorder or extend the procedure.
-
-## Coding rules observed
-
-- Clean modular code; minimal dependencies (no UI/state libraries).
-- No cloud services, no hardcoded secrets.
-- Perception (`sources/`) is a swappable interface; the UI never sees it.
-- Error handling and logging throughout.
-- Offline TTS (Piper) planned for voice alerts — nothing cloud-based.
-
-## Phase 1 module map
-
-```
-frontend/src/
-  domain/
-    types.ts            shared event/detection/step model
-    experiment.ts       configurable experiment definitions
-    reducer.ts          classification state machine (pure, testable)
-  sources/
-    types.ts            EventSource interface (perception boundary)
-    SimulatedSource.ts  scripted fake perception
-    WebSocketSource.ts  Phase-2 real source (ready)
-  hooks/
-    useExperiment.ts    controller: wires source → reducer → state
-  components/
-    LiveFeed.tsx        simulated fixed-camera feed (canvas)
-    StatusPanel.tsx     detected activity, confidence, expected step, errors
-    StepChecklist.tsx   completed / current / next steps
-    EventLog.tsx        timestamped log
-    Header.tsx          status, recording, start/stop
+```bash
+cd backend
+.\.venv\Scripts\activate
+uvicorn app.main:app --reload --port 8000
 ```
 
-The state machine in `domain/reducer.ts` is pure and unit-tested directly with
-Node's native type stripping:
+API docs at http://localhost:8000/docs. Quick check:
+`Invoke-RestMethod http://localhost:8000/api/health`.
+
+## How to run — frontend
 
 ```bash
 cd frontend
-npm run test:reducer
+npm run dev
 ```
+
+Open http://localhost:5173. Vite proxies `/api` and `/ws` to `:8000`.
+
+## How to run — tests
+
+```bash
+# backend (state machine + REST + WebSocket)
+cd backend && python -m pytest
+
+# frontend (state machine parity with backend)
+cd frontend && npm run test:reducer
+
+# frontend static checks / build
+cd frontend && npm run lint && npm run build
+```
+
+## How simulation works
+
+1. Press **Start experiment** (Source: `Backend · FastAPI`).
+2. `POST /api/experiment/start` launches `SimulatedPerception`
+   (`backend/app/simulator.py`) — an async stream of scripted `Detection`s
+   designed to exercise every outcome:
+   - correct steps (`STEP_MATCHED`)
+   - out-of-sequence step (`picks YELLOW when RED was expected`)
+   - skipped-step advisory
+   - repeated step
+   - unknown activity
+   - low-confidence detection
+3. Each detection flows into the state machine
+   (`backend/app/state_machine.py`), which produces classified `Event`s and a
+   `state` snapshot.
+4. Snapshots and events are pushed over `/ws` — the dashboard updates in real
+   time without polling.
+
+Switch the header source to **Local simulator** to run the same scripted
+timeline entirely in the browser (no backend needed).
+
+### Configuring the experiment
+
+The sequence is JSON in `backend/experiments/` (active = first in sorted
+order). The same definition is bundled into the frontend as an offline
+fallback (`frontend/src/domain/experiment.ts`). Schema and notes:
+`docs/ARCHITECTURE.md`. State machine semantics, transition table, and test
+coverage: `docs/STATE_MACHINE.md`.
+
+## Project rules
+
+- Reliability > fancy UI.
+- Perception is separate from decision-making.
+- No LLM as the sequence validator.
+- Offline-first everywhere.
+- Minimal dependencies; clean modular code.
