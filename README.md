@@ -24,6 +24,7 @@ frontend/   React + Vite + Tailwind dashboard
 backend/    FastAPI server (REST + WebSocket + state machine + simulator)
 ai/         OpenCV perception pipeline (mock AND YOLO detectors + webcam) — no FastAPI deps
             + hand/object interaction module (hand.py + pipeline/interaction/)
+dataset/    local-only capture tooling for a custom training dataset (Phase 4A)
 models/     model weights (git-ignored, never auto-downloaded)
 data/       runtime data: recordings/ and logs/ (git-ignored)
 docs/       architecture and design notes
@@ -173,6 +174,22 @@ and the live object list; boxes are drawn on the live feed using percentages
 of the reported frame size. With detection disabled the panel shows an honest
 "detection off" state and how to enable it.
 
+## How to collect a custom dataset (Phase 4A)
+
+No training yet — this phase captures the footage a future custom model will
+be trained on. The recorder (`dataset/scripts/record_dataset.py`) reuses the
+**same camera configuration** as the backend and stores sessions **locally**
+(no upload anywhere):
+
+```powershell
+.\.venv\Scripts\python.exe dataset\scripts\record_dataset.py --label PICK_RED_BOX --interval 0.5
+```
+
+Inside the preview window: **SPACE** starts/stops recording, **Q**/ESC quits.
+Sessions land in `dataset/raw/<label>/session_<ts>_<rand>/` (JPEG frames +
+`manifest.csv` + `metadata.json`). Labels are slugified (`PICK RED BOX` →
+`pick_red_box`). See `dataset/README.md` for flags, guidance, and tests.
+
 **Testing the stream** (backend running):
 
 ```bash
@@ -213,6 +230,9 @@ cd frontend && npm run lint && npm run build
 
 # ai (perception pipeline, mock + yolo + webcam + hand interaction)
 cd ai && python -m pytest
+
+# dataset (session/config logic, no camera needed)
+cd .. && backend\.venv\Scripts\python.exe -m pytest dataset\tests
 ```
 
 ## How to run — perception preview (Phase 3+)

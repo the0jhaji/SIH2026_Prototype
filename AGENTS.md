@@ -78,6 +78,25 @@ its own daemon thread and exposes `GET /api/detection/status` +
 - A generic pretrained YOLO does **not** recognise the BAS-AI classes; keep
   that limitation honest in docs and status.
 
+### Dataset (Phase 4A)
+
+`dataset/` is the **local-only** capture toolset (no upload, no cloud). The
+recorder (`dataset/scripts/record_dataset.py`) reuses the production camera
+config via `backend/camera/capture.py:CameraSettings` — it must never modify
+the camera layer. Sessions land in `dataset/raw/<label>/session_<ts>_<rand>/`
+(JPEG frames + `manifest.csv` + `metadata.json`). Rules:
+
+- Shared logic lives in `dataset/dataset_tool.py` — intentionally **not**
+  `scripts.*`, because `backend/scripts` is already a package; name collision
+  breaks `import`.
+- `DatasetConfig` defaults mirror the backend camera (index 0, 1280×720,
+  30fps); validation lives in `__post_init__`; `interval` is seconds between
+  saved frames.
+- No training here (raw capture only). `frames/` + `annotations/` are filled
+  by later phases.
+- Tests: `backend\.venv\Scripts\python.exe -m pytest dataset\tests -q`
+  (pure logic; never touches a camera or opens a window).
+
 ### Frontend (`frontend/`)
 
 ```powershell
