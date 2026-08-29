@@ -6,15 +6,26 @@ Detection shapes the future camera pipeline will.
 
 Run:
     uvicorn app.main:app --reload --port 8000
+
+Camera:
+    GET  /api/camera/status   state + settings
+    POST /api/camera/start     start capture (real webcam or mock)
+    POST /api/camera/stop      stop and release the device
+    GET  /api/camera/stream    MJPEG multipart stream (browser <img>)
+    GET  /api/camera/snapshot  single JPEG frame
 """
 
 import logging
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response, StreamingResponse
 
+from camera import CameraManager, CameraSettings
+
+from . import config
 from .experiment import load_active_experiment
 from .log_store import LogStore
 from .manager import ConnectionManager
@@ -25,20 +36,34 @@ from .simulator import SimulatedPerception
 logging.basicConfig(level=logging.INFO)
 
 
+def camera_settings_from_config() -> CameraSettings:
+    return CameraSettings(
+        camera_index=config.CAMERA_INDEX,
+        width=config.CAMERA_WIDTH,
+        height=config.CAMERA_HEIGHT,
+        fps=config.CAMERA_FPS,
+        mock=config.CAMERA_MOCK,
+        jpeg_quality=config.CAMERA_JPEG_QUALITY,
+    )
+
+
 def create_app(
     experiment: Optional[ExperimentDef] = None,
     sim_script: Optional[list] = None,
+    camera: Optional[CameraSettings] = None,
 ) -> FastAPI:
     exp = experiment or load_active_experiment()
     manager = ConnectionManager()
     store = LogStore()
     service = ExperimentService(exp, manager, store)
     simulator = SimulatedPerception(sim_script)
+    camera_manager = CameraManager(camera or camera_settings_from_config())
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         yield
         await service.stop()
+        camera_manager.close()
 
     app = FastAPI(title="BAS-AI Backend", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
@@ -53,6 +78,7 @@ def create_app(
     )
     app.state.service = service
     app.state.simulator = simulator
+    app.state.camera_manager = camera_manager
 
     # ------------------------------------------------------------------ REST
 
@@ -63,6 +89,7 @@ def create_app(
             "source": simulator.name,
             "experiment_id": exp.id,
             "clients": manager.count(),
+            "camera_status": camera_manager.status.value,
         }
 
     @app.get("/api/experiment")
@@ -84,6 +111,46 @@ def create_app(
     @app.get("/api/logs")
     async def logs() -> dict:
         return {"events": store.all()}
+
+    # ---------------------------------------------------------------- Camera
+
+    @app.get("/api/camera/status")
+    async def camera_status() -> dict:
+        return camera_manager.info()
+
+    @app.post("/api/camera/start")
+    async def camera_start() -> dict:
+        return camera_manager.start()
+
+    @app.post("/api/camera/stop")
+    async def camera_stop() -> dict:
+        return camera_manager.stop()
+
+    @app.get("/api/camera/stream")
+    async def camera_stream() -> StreamingResponse:
+        if not camera_manager.is_running():
+            raise HTTPException(status_code=503, detail="Camera is not streaming")
+        return StreamingResponse(
+            camera_manager.mjpeg_frames(),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @app.get("/api/camera/snapshot")
+    async def camera_snapshot() -> Response:
+        current = camera_manager.latest_jpeg()
+        if current is None or not camera_manager.is_running():
+            raise HTTPException(status_code=503, detail="Camera is not streaming")
+        return Response(
+            content=current[1],
+            media_type="image/jpeg",
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+        )
 
     # ---------------------------------------------------------------- WebSocket
 

@@ -1,0 +1,1 @@
+# Marks this as a package so the script runs with `python -m scripts.test_camera`.

@@ -1,12 +1,17 @@
+import { CAMERA_STREAM_URL } from './domain/camera'
+import { CameraPanel } from './components/CameraPanel'
 import { EventLog } from './components/EventLog'
 import { Header } from './components/Header'
 import { LiveFeed } from './components/LiveFeed'
 import { StatusPanel } from './components/StatusPanel'
 import { StepChecklist } from './components/StepChecklist'
+import { useCamera } from './hooks/useCamera'
 import { useExperiment } from './hooks/useExperiment'
 
 export default function App() {
   const { state, mode, connected, busy, start, stop, setMode } = useExperiment()
+  const camera = useCamera(mode)
+  const streamUrl = camera.info?.running ? CAMERA_STREAM_URL : null
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200">
@@ -21,7 +26,15 @@ export default function App() {
       />
       <main className="mx-auto grid max-w-7xl grid-cols-1 gap-4 p-4 xl:grid-cols-3">
         <section className="space-y-4 xl:col-span-2">
-          <LiveFeed state={state} />
+          <LiveFeed state={state} streamUrl={streamUrl} />
+          <CameraPanel
+            mode={mode}
+            info={camera.info}
+            offline={camera.offline}
+            sending={camera.sending}
+            onStart={camera.start}
+            onStop={camera.stop}
+          />
         </section>
         <div className="space-y-4">
           <StatusPanel state={state} />

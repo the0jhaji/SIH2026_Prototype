@@ -153,7 +153,7 @@ function hasAction(list: StepDef[], action: StepDef['action'], completed: string
   return list.some(step => step.action === action && completed.includes(step.id))
 }
 
-export function LiveFeed({ state }: { state: ExperimentState }) {
+export function SimulatedFeed({ state }: { state: ExperimentState }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const stateRef = useRef(state)
   useEffect(() => {
@@ -369,4 +369,33 @@ export function LiveFeed({ state }: { state: ExperimentState }) {
       <canvas ref={canvasRef} className="block aspect-video w-full" />
     </div>
   )
+}
+
+/** Stand-in for the canvas simulation when a real camera stream is live. */
+export function LiveCameraFeed({ streamUrl }: { streamUrl: string }) {
+  return (
+    <div className="relative overflow-hidden rounded-lg border border-slate-800 bg-slate-950">
+      <img
+        src={streamUrl}
+        alt="Live camera feed"
+        className="block aspect-video w-full object-cover"
+      />
+      <span className="absolute left-3.5 top-3 rounded bg-black/55 px-2 py-0.5 font-mono text-[11px] font-bold tracking-wide text-slate-200">
+        CAM-01 · LIVE FEED
+      </span>
+    </div>
+  )
+}
+
+export function LiveFeed({
+  state,
+  streamUrl,
+}: {
+  state: ExperimentState
+  streamUrl?: string | null
+}) {
+  if (streamUrl) {
+    return <LiveCameraFeed streamUrl={streamUrl} />
+  }
+  return <SimulatedFeed state={state} />
 }

@@ -8,12 +8,14 @@ live monitoring dashboard — fully offline.
 
 This repository contains the **software prototype foundation**: a React
 dashboard, a FastAPI backend, WebSocket streaming, a configurable experiment
-simulator, an OpenCV perception pipeline with both mock and YOLO detectors, and
-a hand/object interaction module (Phase 4) that turns detections + hand
-landmarks into temporal `HAND_NEAR`/`MOVED`/`PLACED` observations. Real
-trained detection enters by dropping an ONNX model into `models/yolo/`, and
-real hand tracking by dropping `hand_landmarker.task` into `models/pose/`
-(MediaPipe Tasks). **No cloud services, no cloud TTS, no LLM validation.**
+simulator, a local webcam capture layer (Phase 2) that streams MJPEG to the
+dashboard, and an OpenCV perception pipeline with both mock and YOLO
+detectors, plus a hand/object interaction module (Phase 4) that turns
+detections + hand landmarks into temporal `HAND_NEAR`/`MOVED`/`PLACED`
+observations. Real trained detection enters by dropping an ONNX model into
+`models/yolo/`, and real hand tracking by dropping `hand_landmarker.task` into
+`models/pose/` (MediaPipe Tasks). **No cloud services, no cloud TTS, no LLM
+validation.**
 
 ## Monorepo layout
 
@@ -30,6 +32,7 @@ docs/       architecture and design notes
 ## Architecture in one breath
 
 ```
+Webcam → OpenCV (backend/camera) ──MJPEG──► React dashboard (live feed)
 Simulator (scripted detections)      — real: ai/pipeline (cam → detector) in later phases
    │  Detection {activity, confidence, ts}
    ▼
@@ -37,7 +40,7 @@ Experiment state machine (backend)       — the ONLY authority on step validity
    │  classified Events
    ▼
 WebSocket (/ws) ──state snapshots──► React dashboard (real-time updates)
-REST           ──start/stop/status/logs
+REST           ──start/stop/status/logs/camera
 ```
 
 **Perception asks "what is happening?"; the state machine asks "is it valid
@@ -83,6 +86,60 @@ uvicorn app.main:app --reload --port 8000
 
 API docs at http://localhost:8000/docs. Quick check:
 `Invoke-RestMethod http://localhost:8000/api/health`.
+
+## How the camera works (Phase 2)
+
+Dashboard shows a real local webcam feed. The flow is fully offline:
+
+```
+webcam (index 0) → cv2.VideoCapture → CameraManager (background thread)
+   → latest frame encoded as JPEG → MJPEG multipart stream → <img> in React
+```
+
+The **Camera** panel on the dashboard shows a status indicator
+(`CAMERA CONNECTED` / `CAMERA DISCONNECTED` / `CAMERA ERROR`) plus
+**Start camera** / **Stop camera** buttons. The camera starts *off* — press
+Start to begin. Controls are disabled in *Local simulator* mode (the camera
+lives in the backend).
+
+Camera endpoints (`backend/app/main.py`, logic in `backend/camera/`):
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET  /api/camera/status`   | status, source, resolution, frame count, error |
+| `POST /api/camera/start`    | open device + start capture (idempotent) |
+| `POST /api/camera/stop`     | stop capture + release device (idempotent) |
+| `GET  /api/camera/stream`   | MJPEG `multipart/x-mixed-replace`; `503` when not streaming |
+| `GET  /api/camera/snapshot` | single JPEG frame (`503` when not streaming) |
+
+Configuration is env-overridable (`backend/app/config.py`):
+
+```bash
+$env:CAMERA_INDEX="0"; $env:CAMERA_WIDTH="1280"; $env:CAMERA_HEIGHT="720"
+$env:CAMERA_FPS="30";      $env:CAMERA_MOCK="false"   # mock feed for camera-free dev/kiosks
+$env:CAMERA_JPEG_QUALITY="70"
+```
+
+**Mock camera mode** (`CAMERA_MOCK=true`): the same code path drives a
+synthetic animated frame so the whole dashboard (stream, status, controls)
+works with no webcam at all — used by the test suite too.
+
+**Testing the stream** (backend running):
+
+```bash
+curl http://localhost:8000/api/camera/snapshot -o frame.jpg -L   # single frame
+# browser: http://localhost:8000/api/camera/stream (MJPEG, no JS needed)
+```
+
+**Troubleshooting**
+
+- `CAMERA ERROR` after Start: the device at `camera_index` could not be
+  opened — check it is plugged in and not already claimed by another app.
+- The feed freezes/skips: low-end cameras drop frames; lower `CAMERA_WIDTH` /
+  `CAMERA_HEIGHT` / `CAMERA_FPS` or raise `CAMERA_JPEG_QUALITY` balancing
+  quality vs. bandwidth.
+- No camera hardware at all: set `CAMERA_MOCK=true` and the mock feed drives
+  the same UI.
 
 ## How to run — frontend
 

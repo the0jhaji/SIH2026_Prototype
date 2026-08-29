@@ -26,9 +26,29 @@ Project conventions for AI coding agents working in this repository.
 ### Backend (`backend/`, venv at `.venv`)
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest        # run tests
+.\.venv\Scripts\python.exe -m pytest        # run tests (incl. camera)
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 ```
+
+The camera layer lives in `backend/camera/` (`capture.py`: `OpenCVCamera`,
+`MockCamera`, `FrameReader`; `manager.py`: `CameraManager` + `CameraStatus`
+`disconnected|connected|error`). Design rules:
+
+- The manager owns a single background **daemon** capture thread; it encodes
+  JPEGs in that thread and the MJPEG async generator only reads the latest
+  snapshot — the event loop is never blocked by OpenCV.
+- `threading.Lock` is non-reentrant: no*locked* method may call another
+  *locked* method. Snapshot shared state via `_snapshot_locked()` under the
+  lock; everything else calls `info()`/`is_running()`/`latest_jpeg()`.
+- The camera never auto-starts; the dashboard drives it via
+  `POST /api/camera/start|stop`, polls `GET /api/camera/status`, and mounts
+  the live feed with `<img src="/api/camera/stream">`.
+- Tests must never touch a physical device — inject
+  `CameraSettings(mock=True, ...)` into `create_app(..., camera=...)`.
+- Do not test the live MJPEG route by httpx `client.stream(...)` — it hangs on
+  Python 3.14 (Starlette TestClient portal). Use the offline `503` contract +
+  drive `camera_manager.mjpeg_frames()` directly
+  (`backend/tests/test_camera.py`). A uvicorn smoke covers the real stream.
 
 ### Frontend (`frontend/`)
 
