@@ -59,4 +59,3 @@ States: `IDLE`, `RUNNING`, `STOPPED`, `COMPLETED`.
   parametrized over every reachable position in the sequence (51 tests total).
 - `backend/tests/test_state_machine.py` — parity with the frontend reducer and
   the spec's voice example.
-- `frontend/scripts/test-reducer.mjs` (`npm run test:reducer`) — the mirror.

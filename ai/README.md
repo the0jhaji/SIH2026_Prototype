@@ -23,9 +23,10 @@ Camera / NullSource (OpenCV capture)
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
 
-.\.venv\Scripts\python.exe -m pytest                    # 80 tests
+.\.venv\Scripts\python.exe -m pytest                    # 91 tests
 .\.venv\Scripts\python.exe -m pipeline.cli --detector mock               # live preview (webcam)
 .\.venv\Scripts\python.exe -m pipeline.cli --detector mock --source null  # demo, no webcam
+.\.venv\Scripts\python.exe -m pipeline.cli --detector heuristic --source null --print-detections  # model-free demo
 .\.venv\Scripts\python.exe -m pipeline.cli --detector mock --headless --print-detections
 .\.venv\Scripts\python.exe -m pipeline.cli --interaction --headless --print-detections  # demo interaction chain
 ```

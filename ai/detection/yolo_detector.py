@@ -6,7 +6,7 @@ and the backend records it as an ERROR status. Weight loading (``load()``) is
 separate from inference (``detect()``) so a custom-trained model can be
 swapped in without touching the caller.
 
-Class names: by default the BAS-AI scene classes. If a ``.names`` file sits
+Class names: by default the Astra AI scene classes. If a ``.names`` file sits
 next to the ONNX model (one class name per line, index-aligned), it overrides
 the list — that is how a future custom-trained model carries its own labels.
 

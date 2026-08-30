@@ -1,0 +1,11 @@
+{
+  "seed": 42,
+  "ratios": {
+    "train": 0.7,
+    "val": 0.2,
+    "test": 0.1
+  },
+  "session_split": {
+    "box_experiment/session_20260829_233703_6weu": "train"
+  }
+}

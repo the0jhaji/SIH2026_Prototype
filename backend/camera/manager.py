@@ -25,7 +25,7 @@ import numpy as np
 
 from .capture import CameraError, CameraSettings, FrameReader, MockCamera, OpenCVCamera
 
-logger = logging.getLogger("basai.camera")
+logger = logging.getLogger("astraai.camera")
 
 FRAME_BOUNDARY = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
 
@@ -137,7 +137,7 @@ class CameraManager:
             self._stop.clear()
             self._thread = threading.Thread(
                 target=self._capture_loop,
-                name="basai-camera-capture",
+                name="astraai-camera-capture",
                 daemon=True,
             )
             self._thread.start()

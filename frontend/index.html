@@ -4,7 +4,13 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>BAS-AI — Experiment Assistant</title>
+    <title>Astra AI — Experiment Assistant</title>
+    <script>
+      try {
+        var saved = localStorage.getItem('astra-theme')
+        document.documentElement.classList.toggle('dark', saved !== 'light')
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

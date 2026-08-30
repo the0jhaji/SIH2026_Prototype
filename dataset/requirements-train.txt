@@ -1,0 +1,13 @@
+# Optional training-only dependency for the Astra AI object detector (Phase 4C).
+# Needed only on the machine that TRAINS/exports the model — the runtime never
+# imports ultralytics; the backend reads the exported ONNX through OpenCV DNN.
+#
+# Install into its own venv (keeps the backend venv lean):
+#   python -m venv .venv-train
+#   .venv-train\Scripts\pip install -r dataset\requirements-train.txt
+#   .venv-train\Scripts\yolo train data=dataset\training\data.yaml model=yolov8n.pt epochs=200 imgsz=640
+#
+# Export to ONNX afterwards:
+#   .venv-train\Scripts\yolo export model=runs/detect/train/weights/best.pt format=onnx
+# then install with dataset\scripts\install_detection_model.py.
+ultralytics>=8.2.0

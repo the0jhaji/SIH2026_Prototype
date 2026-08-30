@@ -13,8 +13,10 @@ Project conventions for AI coding agents working in this repository.
 
 - Perception (`Detection`) is separate from decision-making (state machine).
   The state machine is the only authority on step validity — never an LLM.
-- Experiment sequences are **data** (JSON in `backend/experiments/`), not
-  application code.
+- Experiment sequences are **data**: the canonical definition is
+  `experiment/experiment.json` (the runtime default and the activity
+  vocabulary source); `backend/experiments/*.json` are drop-in demo/legacy
+  definitions. Never hardcode an experiment in code.
 - Field naming mirrors across Python and TypeScript (camelCase JSON, e.g.
   `stepId`, `currentStepIndex`) so snapshots pass through without mapping.
 - Keep new dependencies minimal. Install them before use and note them in the
@@ -66,6 +68,12 @@ its own daemon thread and exposes `GET /api/detection/status` +
 - Mock detector is deterministic (`person 0.95`, `red_box 0.91`,
   `yellow_box 0.89`, boxes derived from frame size) so e2e/API tests are
   stable; `scene="empty"` yields no detections.
+- `heuristic` detector (`DETECTION_BACKEND=heuristic`,
+  `ai/detection/heuristic_detector.py`) is model-free and runs on real pixels:
+  `person` from frame-to-frame motion, `red_box`/`yellow_box` from saturated
+  HSV-hue blobs. Deterministic for synthetic input, imperfect on live scenes,
+  and it deliberately **never** reports `experiment_box`/`target_area` — those
+  honestly require a trained model.
 - YoloDetector reuses `ai/pipeline/yolo.py` helpers (letterbox, postprocess,
   `resolve_weights_path`); a `.names` file next to the ONNX overrides classes.
 - The DetectionService thread calls only `camera_manager.latest_capture()`
@@ -75,8 +83,44 @@ its own daemon thread and exposes `GET /api/detection/status` +
   `ai` after `app.main` (which puts the repo root on `sys.path`);
   `ai/tests/test_detection.py` runs under `ai/.venv` (root inserted via
   `ai/conftest.py`).
-- A generic pretrained YOLO does **not** recognise the BAS-AI classes; keep
+- A generic pretrained YOLO does **not** recognise the Astra AI classes; keep
   that limitation honest in docs and status.
+
+### Runtime activity perception (Phase 5C bridge)
+
+`backend/app/activity_perception.py` is the seam that feeds the state machine
+at runtime (same `Detection` shape the scripted feed always used). Rules:
+
+- `load_active_experiment()` prefers the canonical
+  `experiment/experiment.json` (override with the `EXPERIMENT_FILE` env var);
+  `backend/experiments/*.json` is the legacy fallback. `StepDef`/`ExperimentDef`
+  carry the canonical contract (optional fields) so legacy demo JSON still parses.
+- Perception source selection: a provided `sim_script` always opts into
+  `SimulatedPerception` (tests/back-compat); otherwise `ACTIVITY_BACKEND`
+  (`live` default | `mock` | `sim`) picks `LiveActivityPerception`,
+  `MockActivityPerception` or `SimulatedPerception`.
+- `LiveActivityPerception` (DEFAULT) is the **camera-grounded** source. It
+  polls `DetectionService.latest()` (honest object detections only — mock,
+  yolo or heuristic) and emits a step Detection when the currently expected
+  step's `expectedObjects` are all present on a fresh frame at/above
+  `conf_threshold`. Rules:
+  - Stale gate: detector disabled/errored or no inference within
+    `ACTIVITY_STALE_MS` (camera stopped) ⇒ no emission — the experiment
+    never advances or completes out of thin air.
+  - Emission is edge-triggered per expected step (empty `expectedObjects`
+    steps never fire; holding an object in view never repeats a step).
+    Because only the expected step can emit, `live` is deliberately silent
+    about repeated/out-of-sequence actions — that coverage is the mock's job.
+  - `service.start()` calls `perception.reset()` when present; pass the
+    session's `current_step_index` via `current_index` at wiring time.
+- `MockActivityPerception` is a **mock** — deterministic and derived from the
+  loaded experiment's own steps (correct sequence + a fixed rotation of
+  planted mistakes: later-step OOS, repeat, low-confidence, unknown). It never
+  claims to interpret camera frames; a real activity model plugs in at this
+  same seam later. The object-detection overlay (`DetectionService`) stays a
+  separate, honest sidebar.
+- `ExperimentService.start(perception)` only needs an async `detections()`
+  iterator — swap sources without touching decision-making.
 
 ### Dataset (Phase 4A)
 
@@ -96,6 +140,72 @@ the camera layer. Sessions land in `dataset/raw/<label>/session_<ts>_<rand>/`
   by later phases.
 - Tests: `backend\.venv\Scripts\python.exe -m pytest dataset\tests -q`
   (pure logic; never touches a camera or opens a window).
+
+### Dataset annotation + split (Phase 4B)
+
+`dataset/annotation/` is an **independent, dev-only** browser tool (no runtime
+coupling to the BAS app, no new deps — stdlib `http.server`). It reads
+`dataset/raw/`, writes YOLO label files into `dataset/annotations/` mirroring
+raw paths (`frame_000001.jpg` → `frame_000001.txt`, `class cx cy w h`,
+normalized 0–1), and never touches the originals. Rules:
+
+- Classes are **config data**, not code: `dataset/annotation/classes.json`
+  (edit it to add/rename classes; index = YOLO class id).
+- Shared logic lives in `dataset/annotation/annotator.py` (parsing,
+  validation, session grouping, split, leakage checks) — imported by
+  `app.py`, `scripts/prepare_split.py`, `scripts/validate_dataset.py` and the
+  tests. Never re-implement it.
+- **Split is by recording *session*** (an image's directory under `raw/`), so
+  one session can never appear in more than one of train/val/test (default
+  70/20/10, `--seed`). The split CLI/validator stay consistent with
+  `annotator.make_split` / `find_session_leakage`.
+- Annotations with no boxes (blank label) are valid (negative/background
+  frames); a **missing** label file for a split image is an error.
+- Commands (backend venv, repo root): annotate
+  `.\\.venv\\Scripts\\python.exe dataset\\annotation\\app.py`, split
+  `dataset\\scripts\\prepare_split.py --root dataset`, validate
+  `dataset\\scripts\\validate_dataset.py --root dataset`.
+
+### Training bridge (Phase 4C)
+
+`dataset/training_tool.py` + `dataset/scripts/export_training.py` translate
+the validated split into an ultralytics `data.yaml`; `install_detection_model.py`
+installs a trained ONNX + `.names` for the runtime. Rules:
+
+- `make_data_yaml` reuses `annotator.validate_dataset` (missing labels are
+  errors, blank labels fine, class-id range, session leakage) and requires
+  non-empty train+val; `test` is omitted when empty. Raises `ValueError` (CLI
+  exits 2) on anything untrainable.
+- Ultralytics is **optional and never imported at runtime**
+  (`dataset/requirements-train.txt`). The backend reads the exported ONNX via
+  OpenCV DNN only.
+- The `.names` file written next to the ONNX (from `classes.json`,
+  index-aligned) is the trained-class contract with
+  `ai/detection/yolo_detector.py` — never hand-edit a class list in code.
+- Commands (backend venv, repo root): export
+  `dataset\\scripts\\export_training.py --root dataset`, install
+  `dataset\\scripts\\install_detection_model.py --onnx <exported>.onnx`. See
+  `models/detection/README.md` for the full train → export → install → run loop.
+
+### Activity dataset (Phase 5B)
+
+`dataset/scripts/record_activity.py` records **activity** takes into
+`dataset/activity/<ACTIVITY>/session_<ts>_<rand>/` (JPEG + `manifest.csv` +
+`metadata.json`). Rules:
+
+- **Activity names are data from the canonical `experiment/experiment.json`**
+  (`activities` list) — the vocabulary is never duplicated in code or other
+  files. `--activity` uses argparse `choices=load_activities()` so invalid
+  names fail fast.
+- Shared logic lives in `dataset/activity_tool.py` (pure, camera-free like
+  `dataset_tool.py`): vocabulary loading, `ActivityConfig` (with
+  `to_camera_settings()` reusing the backend camera layer), session
+  creation, metadata, manifest. `record_activity.py` reuses the proven HUD
+  helpers `_shade`/`_text` and `KEY_SPACE`/`KEY_ESC` from `record_dataset.py`.
+- `metadata.json` schema `bas-activity-session/1`; `source` is `webcam` or
+  `mock`. The recorder CLI + tests cover invalid-activity rejection.
+- `record_dataset.py` (object feeder `raw/`) and `experiment/experiment.json`
+  stay untouched — activity sessions never mix with object sessions.
 
 ### Frontend (`frontend/`)
 

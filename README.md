@@ -1,4 +1,4 @@
-# BAS-AI — SIH 2026 PS 26174
+# Astra AI — SIH 2026 PS 26174
 
 Offline AI-based **Human Activity Recognition** for on-board experiment
 assistance on Bharatiya Antariksh Station (BAS). A fixed camera watches the
@@ -21,10 +21,11 @@ validation.**
 
 ```
 frontend/   React + Vite + Tailwind dashboard
-backend/    FastAPI server (REST + WebSocket + state machine + simulator)
+backend/    FastAPI server (REST + WebSocket + state machine + perception stage)
 ai/         OpenCV perception pipeline (mock AND YOLO detectors + webcam) — no FastAPI deps
             + hand/object interaction module (hand.py + pipeline/interaction/)
 dataset/    local-only capture tooling for a custom training dataset (Phase 4A)
+experiment/ canonical machine-readable experiment definition (experiment.json)
 models/     model weights (git-ignored, never auto-downloaded)
 data/       runtime data: recordings/ and logs/ (git-ignored)
 docs/       architecture and design notes
@@ -34,9 +35,10 @@ docs/       architecture and design notes
 
 ```
 Webcam → OpenCV (backend/camera) ──MJPEG──► React dashboard (live feed)
-Simulator (scripted detections)      — real: ai/pipeline (cam → detector) in later phases
-   │  Detection {activity, confidence, ts}
-   ▼
+Perception stage (activity detections)      — live (default, camera-grounded:
+   │  Detection {activity, confidence, ts}     expected step's objects visible)
+   ▼                                         — mock-activity (demo feed)
+                                             — simulated (scripted legacy feed)
 Experiment state machine (backend)       — the ONLY authority on step validity
    │  classified Events
    ▼
@@ -190,6 +192,29 @@ Sessions land in `dataset/raw/<label>/session_<ts>_<rand>/` (JPEG frames +
 `manifest.csv` + `metadata.json`). Labels are slugified (`PICK RED BOX` →
 `pick_red_box`). See `dataset/README.md` for flags, guidance, and tests.
 
+## How to annotate, split and validate the dataset (Phase 4B)
+
+The annotation tool is a **dev-only, local-only** browser app (stdlib Python
+server, no new dependencies, independent of the BAS runtime):
+
+```powershell
+# 1. Annotate: opens http://127.0.0.1:8700 — drag boxes, pick a class,
+#    then S saves a YOLO label into dataset/annotations/ (N/P/D/C/Q = next,
+#    prev, delete, clear, quit; class keys 0-4).
+.\.venv\Scripts\python.exe dataset\annotation\app.py
+
+# 2. Validate the source labels.
+.\.venv\Scripts\python.exe dataset\scripts\validate_dataset.py --root dataset
+
+# 3. Split by recording session (80/20/10) — a session is never divided.
+.\.venv\Scripts\python.exe dataset\scripts\prepare_split.py --root dataset
+
+# 4. Validate the split (labels present, YOLO-legal, no session leakage).
+.\.venv\Scripts\python.exe dataset\scripts\validate_dataset.py --root dataset
+```
+
+Classes are config data in `dataset/annotation/classes.json`.
+
 **Testing the stream** (backend running):
 
 ```bash
@@ -231,7 +256,7 @@ cd frontend && npm run lint && npm run build
 # ai (perception pipeline, mock + yolo + webcam + hand interaction)
 cd ai && python -m pytest
 
-# dataset (session/config logic, no camera needed)
+# dataset (capture + annotation/split/validation logic, no camera needed)
 cd .. && backend\.venv\Scripts\python.exe -m pytest dataset\tests
 ```
 
@@ -252,32 +277,53 @@ automatically. See `ai/README.md` for the detector interface, the interaction
 module, and the `{class_name, confidence, bounding_box, timestamp}` JSON
 contract.
 
-## How simulation works
+## How the activity feed works
 
 1. Press **Start experiment** (Source: `Backend · FastAPI`).
-2. `POST /api/experiment/start` launches `SimulatedPerception`
-   (`backend/app/simulator.py`) — an async stream of scripted `Detection`s
-   designed to exercise every outcome:
-   - correct steps (`STEP_MATCHED`)
-   - out-of-sequence step (`picks YELLOW when RED was expected`)
-   - skipped-step advisory
-   - repeated step
-   - unknown activity
-   - low-confidence detection
+2. `POST /api/experiment/start` launches the configured perception source:
+   - **live** (default, `ACTIVITY_BACKEND=live`):
+     `LiveActivityPerception` (`backend/app/activity_perception.py`) — the
+     **camera-grounded** source. It watches the object-detection service
+     (`GET /api/detections`) and emits a step only when the currently expected
+     step's `expectedObjects` are all visible on a fresh frame (Detectors:
+     `mock` for demos, `heuristic` for model-free real color/motion, `yolo`
+     once your model is trained). Camera off or no fresh frame -> it waits,
+     honestly. The experiment never completes out of thin air.
+   - **mock-activity** (`ACTIVITY_BACKEND=mock`): `MockActivityPerception` —
+     a deterministic feed **derived from the loaded experiment definition
+     itself** (`experiment/experiment.json`): the correct steps plus a fixed
+     rotation of planted mistakes so a run exercises every outcome:
+     - correct steps (`STEP_MATCHED`)
+     - out-of-sequence step (picks a later step early)
+     - skipped-step advisory
+     - repeated step
+     - unknown activity
+     - low-confidence detection
+   - **simulated** (`ACTIVITY_BACKEND=sim`): the original scripted feed
+     (`backend/app/simulator.py`) — kept for tests and backwards compatibility.
 3. Each detection flows into the state machine
    (`backend/app/state_machine.py`), which produces classified `Event`s and a
    `state` snapshot.
 4. Snapshots and events are pushed over `/ws` — the dashboard updates in real
-   time without polling.
+   time without polling. `/api/health` reports the live source name.
 
-Switch the header source to **Local simulator** to run the same scripted
-timeline entirely in the browser (no backend needed).
+Switch the header source to **Local simulator** to run a scripted timeline
+entirely in the browser (no backend needed).
+
+> The camera-grounded feed only speaks when it actually sees the expected
+> objects — with the model-free `heuristic` detector that means `person`
+> (motion), `red_box`/`yellow_box` (colour). Seeing the `experiment_box` or
+> `target_area` honestly requires a trained YOLO model (Phase 4C pipeline) —
+> until then the experiment waits at those steps rather than guessing.
 
 ### Configuring the experiment
 
-The sequence is JSON in `backend/experiments/` (active = first in sorted
-order). The same definition is bundled into the frontend as an offline
-fallback (`frontend/src/domain/experiment.ts`). Schema and notes:
+The canonical sequence is `experiment/experiment.json` (runtime default and
+the single source of the activity vocabulary). `backend/experiments/*.json`
+are drop-in legacy definitions. `EXPERIMENT_FILE=<path>` forces a specific
+file. The frontend bundle ships a copy as an offline fallback
+(`frontend/src/domain/experiment.ts`); when the backend is live the canonical
+definition is served via `/api/experiment`. Schema and notes:
 `docs/ARCHITECTURE.md`. State machine semantics, transition table, and test
 coverage: `docs/STATE_MACHINE.md`.
 

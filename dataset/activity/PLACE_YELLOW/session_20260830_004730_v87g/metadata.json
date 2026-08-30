@@ -1,0 +1,18 @@
+{
+  "schema": "bas-activity-session/1",
+  "activity": "PLACE_YELLOW",
+  "session_id": "20260830_004730_v87g",
+  "started_at": "2026-08-30T00:47:30+05:30",
+  "ended_at": "2026-08-30T00:47:39+05:30",
+  "camera": {
+    "index": 0,
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "mock": false
+  },
+  "frame_count": 26,
+  "interval": 0.1,
+  "source": "webcam",
+  "storage": "local-only; never uploaded"
+}

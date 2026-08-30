@@ -17,7 +17,7 @@ import numpy as np
 from .base import BaseDetector
 from .detections import Box, ObjectDetection
 
-#: The five classes the YOLO detector is expected to output (BAS-AI scene).
+#: The five classes the YOLO detector is expected to output (Astra AI scene).
 REQUIRED_CLASSES = ("person", "experiment_box", "red_box", "yellow_box", "target_area")
 
 

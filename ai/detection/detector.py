@@ -62,7 +62,9 @@ def create_detector(
 
     - ``mock`` — deterministic synthetic detections, no weights.
     - ``yolo`` — YOLOv8 ONNX via OpenCV DNN (weights in ``models/detection/``).
+    - ``heuristic`` — real, model-free HSV color + motion detection.
     """
+    from .heuristic_detector import ColorMotionDetector
     from .mock_detector import MockDetector
     from .yolo_detector import YoloDetector
 
@@ -75,4 +77,6 @@ def create_detector(
             conf_threshold=conf_threshold,
             use_cuda=use_cuda,
         )
-    raise ValueError(f"Unknown detector kind: {kind!r} (expected 'mock' or 'yolo')")
+    if kind == "heuristic":
+        return ColorMotionDetector(conf_threshold=conf_threshold)
+    raise ValueError(f"Unknown detector kind: {kind!r} (expected 'mock', 'yolo' or 'heuristic')")

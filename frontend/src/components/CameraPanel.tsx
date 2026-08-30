@@ -2,9 +2,9 @@ import type { CameraInfo, CameraStatus } from '../domain/camera'
 import type { ExperimentMode } from '../hooks/useExperiment'
 
 const STATUS_STYLE: Record<CameraStatus, string> = {
-  connected: 'border-emerald-500/50 bg-emerald-950/60 text-emerald-300',
-  disconnected: 'border-slate-600/60 bg-slate-800/60 text-slate-400',
-  error: 'border-rose-500/50 bg-rose-950/60 text-rose-300',
+  connected: 'border-emerald-500/50 bg-emerald-100/70 text-emerald-700 dark:border-emerald-500/50 dark:bg-emerald-950/60 dark:text-emerald-300',
+  disconnected: 'border-slate-300/70 bg-slate-200/70 text-slate-600 dark:border-slate-600/60 dark:bg-slate-800/60 dark:text-slate-400',
+  error: 'border-rose-500/50 bg-rose-100/70 text-rose-700 dark:border-rose-500/50 dark:bg-rose-950/60 dark:text-rose-300',
 }
 
 const STATUS_LABEL: Record<CameraStatus, string> = {
@@ -29,9 +29,9 @@ export function CameraPanel({ mode, info, offline, sending, onStart, onStop }: P
   const disabled = !backendActive || sending || offline
 
   return (
-    <section className="rounded-lg border border-slate-800 bg-slate-900/70 p-4">
+    <section className="panel p-4">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400">Camera</h2>
+        <h2 className="heading-title">Camera</h2>
         <span
           className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold tracking-wide ${STATUS_STYLE[status]}`}
         >
@@ -46,31 +46,31 @@ export function CameraPanel({ mode, info, offline, sending, onStart, onStop }: P
       </div>
 
       <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-        <div className="rounded-md bg-slate-800/60 px-2 py-1.5">
-          <p className="text-[10px] uppercase tracking-wider text-slate-500">Source</p>
-          <p className="font-mono text-sm font-semibold text-slate-200">
+        <div className="tile px-2 py-1.5">
+          <p className="overline-label">Source</p>
+          <p className="copy-value">
             {info ? info.source : '—'}
           </p>
         </div>
-        <div className="rounded-md bg-slate-800/60 px-2 py-1.5">
-          <p className="text-[10px] uppercase tracking-wider text-slate-500">Resolution</p>
-          <p className="font-mono text-sm font-semibold text-slate-200">
+        <div className="tile px-2 py-1.5">
+          <p className="overline-label">Resolution</p>
+          <p className="copy-value">
             {info ? `${info.width}×${info.height}` : '—'}
           </p>
         </div>
-        <div className="rounded-md bg-slate-800/60 px-2 py-1.5">
-          <p className="text-[10px] uppercase tracking-wider text-slate-500">Frames</p>
-          <p className="font-mono text-sm font-semibold text-slate-200">
+        <div className="tile px-2 py-1.5">
+          <p className="overline-label">Frames</p>
+          <p className="copy-value">
             {info ? String(info.frameCount) : '—'}
           </p>
         </div>
       </div>
 
       {info?.error && (
-        <p className="mt-2 text-xs text-rose-300">{(info.error as string) ?? ''}</p>
+        <p className="mt-2 text-xs text-rose-600 dark:text-rose-300">{(info.error as string) ?? ''}</p>
       )}
       {offline && (
-        <p className="mt-2 text-xs text-amber-300">Backend unreachable — camera controls unavailable.</p>
+        <p className="mt-2 text-xs text-amber-600 dark:text-amber-300">Backend unreachable — camera controls unavailable.</p>
       )}
       {mode !== 'backend' && (
         <p className="mt-2 text-xs text-slate-500">Camera runs through the backend; switch to Backend mode.</p>
@@ -81,7 +81,7 @@ export function CameraPanel({ mode, info, offline, sending, onStart, onStop }: P
           type="button"
           onClick={onStart}
           disabled={disabled || running}
-          className="rounded-lg border border-emerald-500/50 bg-emerald-600/20 px-4 py-1.5 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-600/30 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-lg border border-emerald-600/60 bg-emerald-100 px-4 py-1.5 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-40 dark:border-emerald-500/50 dark:bg-emerald-600/20 dark:text-emerald-300 dark:hover:bg-emerald-600/30"
         >
           Start camera
         </button>
@@ -89,7 +89,7 @@ export function CameraPanel({ mode, info, offline, sending, onStart, onStop }: P
           type="button"
           onClick={onStop}
           disabled={disabled || !running}
-          className="rounded-lg border border-rose-500/50 bg-rose-600/20 px-4 py-1.5 text-sm font-semibold text-rose-300 transition hover:bg-rose-600/30 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-lg border border-rose-600/60 bg-rose-100 px-4 py-1.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-200 disabled:cursor-not-allowed disabled:opacity-40 dark:border-rose-500/50 dark:bg-rose-600/20 dark:text-rose-300 dark:hover:bg-rose-600/30"
         >
           Stop camera
         </button>

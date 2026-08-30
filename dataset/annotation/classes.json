@@ -1,0 +1,9 @@
+{
+  "classes": [
+    "person",
+    "experiment_box",
+    "red_box",
+    "yellow_box",
+    "target_area"
+  ]
+}

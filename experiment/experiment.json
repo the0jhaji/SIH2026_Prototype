@@ -1,0 +1,163 @@
+{
+  "schemaVersion": "1.0",
+  "id": "bas-box-handling-01",
+  "name": "BAS Box Handling Experiment",
+  "prototype": true,
+  "disclaimer": "This is a CUSTOM PROTOTYPE experiment designed for the SIH 2026 prototype, INSPIRED BY ISRO Problem Statement 26174. The official publicly available description is truncated after 'You are given a box that contains two smaller boxes of color red and yellow...', so the 7-step sequence below is OUR OWN demonstration sequence and is NOT the official ISRO sequence. It exists only to develop and validate a local activity-recognition + sequence-validation prototype.",
+  "description": "An astronaut approaches the experiment area, opens the main experiment box (which contains one red box and one yellow box), then picks each box up and places it into the designated target area. The experiment is complete once both boxes are correctly placed.",
+  "initialState": {
+    "location": "experiment area",
+    "boxOpen": false,
+    "objectsInsideMainBox": ["red_box", "yellow_box"],
+    "targetAreaEmpty": true
+  },
+  "objects": [
+    { "id": "person",         "classId": 0, "name": "Person",        "role": "actor" },
+    { "id": "experiment_box", "classId": 1, "name": "Experiment Box", "role": "container" },
+    { "id": "red_box",        "classId": 2, "name": "Red Box",        "role": "handled-object" },
+    { "id": "yellow_box",     "classId": 3, "name": "Yellow Box",     "role": "handled-object" },
+    { "id": "target_area",    "classId": 4, "name": "Target Area",    "role": "destination" }
+  ],
+  "activities": [
+    "APPROACH",
+    "OPEN_BOX",
+    "PICK_RED",
+    "PLACE_RED",
+    "PICK_YELLOW",
+    "PLACE_YELLOW",
+    "COMPLETE"
+  ],
+  "steps": [
+    {
+      "id": "step1",
+      "order": 1,
+      "activity": "APPROACH",
+      "label": "Astronaut approaches the experiment area",
+      "description": "The astronaut enters the experiment area and is detected near the setup.",
+      "expectedObjects": ["person"]
+    },
+    {
+      "id": "step2",
+      "order": 2,
+      "activity": "OPEN_BOX",
+      "label": "Astronaut opens the main experiment box",
+      "description": "The main experiment box is opened so the red and yellow boxes inside become reachable.",
+      "expectedObjects": ["experiment_box"]
+    },
+    {
+      "id": "step3",
+      "order": 3,
+      "activity": "PICK_RED",
+      "label": "Astronaut picks up the red box",
+      "description": "The red box is lifted out of the main experiment box.",
+      "expectedObjects": ["red_box"]
+    },
+    {
+      "id": "step4",
+      "order": 4,
+      "activity": "PLACE_RED",
+      "label": "Astronaut places the red box into the designated target area",
+      "description": "The red box is placed inside the target area.",
+      "expectedObjects": ["red_box", "target_area"]
+    },
+    {
+      "id": "step5",
+      "order": 5,
+      "activity": "PICK_YELLOW",
+      "label": "Astronaut picks up the yellow box",
+      "description": "The yellow box is lifted out of the main experiment box.",
+      "expectedObjects": ["yellow_box"]
+    },
+    {
+      "id": "step6",
+      "order": 6,
+      "activity": "PLACE_YELLOW",
+      "label": "Astronaut places the yellow box into the designated target area",
+      "description": "The yellow box is placed inside the target area.",
+      "expectedObjects": ["yellow_box", "target_area"]
+    },
+    {
+      "id": "step7",
+      "order": 7,
+      "activity": "COMPLETE",
+      "label": "Both boxes are correctly placed and the experiment is complete",
+      "description": "Both the red and yellow box are inside the target area. Terminal step - the experiment finishes.",
+      "expectedObjects": ["red_box", "yellow_box", "target_area"],
+      "terminal": true
+    }
+  ],
+  "validationRules": {
+    "mode": "strict-sequence",
+    "advanceOnMatch": true,
+    "stayOnStepOnError": true,
+    "nextExpectedOnError": "unchanged - the offending step must be performed again to advance",
+    "skippedStepEvidence": "SKIPPED_STEP is advisory and is only emitted together with OUT_OF_SEQUENCE; progress advances exclusively on STEP_MATCHED",
+    "lowConfidenceThreshold": 0.5,
+    "terminalSteps": ["COMPLETE"],
+    "canonicalResultLabels": ["CORRECT", "OUT_OF_SEQUENCE", "SKIPPED", "REPEATED", "UNKNOWN", "LOW_CONFIDENCE"],
+    "canonicalEventKinds": [
+      "STEP_MATCHED",
+      "OUT_OF_SEQUENCE",
+      "SKIPPED_STEP",
+      "REPEATED_STEP",
+      "UNKNOWN_ACTIVITY",
+      "LOW_CONFIDENCE",
+      "EXPERIMENT_STARTED",
+      "EXPERIMENT_STOPPED",
+      "EXPERIMENT_COMPLETED",
+      "RECORDING_STARTED",
+      "RECORDING_STOPPED"
+    ]
+  },
+  "errorTypes": [
+    {
+      "code": "CORRECT",
+      "kind": "STEP_MATCHED",
+      "when": "detected activity equals the expected step",
+      "advance": true,
+      "progressEffect": "advance to next step"
+    },
+    {
+      "code": "OUT_OF_SEQUENCE",
+      "kind": "OUT_OF_SEQUENCE",
+      "when": "known activity from a later step is detected before the expected step",
+      "advance": false,
+      "progressEffect": "none - expected step stays"
+    },
+    {
+      "code": "SKIPPED",
+      "kind": "SKIPPED_STEP",
+      "when": "advisory emitted together with OUT_OF_SEQUENCE (a later step implies earlier steps were skipped)",
+      "advance": false,
+      "progressEffect": "none"
+    },
+    {
+      "code": "REPEATED",
+      "kind": "REPEATED_STEP",
+      "when": "known activity from an already-completed step is detected again",
+      "advance": false,
+      "progressEffect": "none"
+    },
+    {
+      "code": "UNKNOWN",
+      "kind": "UNKNOWN_ACTIVITY",
+      "when": "detected activity is null or not defined in this experiment",
+      "advance": false,
+      "progressEffect": "none"
+    },
+    {
+      "code": "LOW_CONFIDENCE",
+      "kind": "LOW_CONFIDENCE",
+      "when": "detected activity confidence is below the validationRules.lowConfidenceThreshold",
+      "advance": false,
+      "progressEffect": "none - treat the detection as uncertain"
+    }
+  ],
+  "example": {
+    "expected": "PICK_RED",
+    "observed": "PICK_YELLOW",
+    "result": "OUT_OF_SEQUENCE",
+    "nextExpected": "PICK_RED",
+    "note": "The expected step does not change when a later step fires out of order; the operator (or voice cue) re-prompts for the expected step."
+  }
+}

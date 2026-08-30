@@ -19,6 +19,7 @@ Keys inside the preview window:
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 import time
 from datetime import datetime
@@ -78,6 +79,35 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _shade(frame, x1: int, y1: int, x2: int, y2: int, color, alpha: float) -> None:
+    """Filled, semi-transparent rectangle so text stays readable on any scene."""
+    import cv2
+
+    layer = frame.copy()
+    cv2.rectangle(layer, (x1, y1), (x2, y2), color, -1)
+    cv2.addWeighted(layer, alpha, frame, 1.0 - alpha, 0.0, dst=frame)
+
+
+def _text(
+    frame,
+    text: str,
+    org,
+    scale: float,
+    color,
+    thickness: int = 1,
+    *,
+    align_right: int | None = None,
+) -> None:
+    """Crisp, opaque text on the frame; ``align_right`` right-aligns to x."""
+    import cv2
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    if align_right is not None:
+        (tw, _th), _baseline = cv2.getTextSize(text, font, scale, thickness)
+        org = (align_right - tw, org[1])
+    cv2.putText(frame, text, org, font, scale, color, thickness, cv2.LINE_AA)
+
+
 def draw_overlay(
     frame,
     *,
@@ -88,36 +118,65 @@ def draw_overlay(
     interval: float,
     mock: bool,
 ) -> None:
-    """Paint the status strip + control hints onto the preview frame (mutates)."""
+    """Paint a high-visibility status HUD onto the preview frame (mutates)."""
     import cv2
+    import time
 
     h, w = frame.shape[:2]
-    cv2.rectangle(frame, (8, 8), (w - 8, 92), (8, 10, 16), -1)
-    cv2.rectangle(frame, (8, 8), (w - 8, 92), (45, 48, 60), 1)
+    scale = max(1.0, (w / 1280 + h / 720) / 2.0)
+    margin = 10
+    band_h = max(134, int(h * 0.22))
 
-    mode_color = (80, 235, 255) if recording else (140, 170, 200)
-    state = f"REC {elapsed:05.1f}s" if recording else "READY"
-    cv2.putText(
-        frame,
-        f"● {state}   FPS {fps:4.1f}   SAVED {saved}   EVERY {interval:g}s"
-        + ("   [MOCK]" if mock else ""),
-        (20, 40),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.6,
-        mode_color,
-        2,
-        cv2.LINE_AA,
-    )
-    cv2.putText(
-        frame,
-        "[SPACE] start / stop recording   [Q] / [ESC] quit",
-        (20, 72),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.55,
-        (190, 195, 205),
-        1,
-        cv2.LINE_AA,
-    )
+    # Semi-transparent dark band + thin divider so the text stays readable
+    # regardless of what the camera is pointed at.
+    _shade(frame, 0, 0, w, band_h, (9, 11, 17), alpha=0.66)
+    cv2.rectangle(frame, (0, band_h - 2), (w - 1, band_h), (90, 100, 122), 2)
+
+    # Row 1: title on the left, FPS + SAVED right-aligned.
+    title = "BAS DATASET RECORDER" + ("  [MOCK]" if mock else "")
+    _text(frame, title, (margin, int(26 * scale)), 0.8 * scale, (240, 242, 248), 2)
+
+    saved_txt = f"SAVED: {saved}"
+    fps_txt = f"FPS: {fps:4.1f}"
+    (saved_w, _), _ = cv2.getTextSize(saved_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.6 * scale, 2)
+    (fps_w, _), _ = cv2.getTextSize(fps_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.6 * scale, 2)
+    _text(frame, fps_txt, (0, int(30 * scale)), 0.6 * scale, (222, 226, 236), 2,
+          align_right=w - margin - saved_w - 56)
+    _text(frame, saved_txt, (0, int(30 * scale)), 0.6 * scale, (240, 242, 248), 2,
+          align_right=w - margin)
+
+    # Row 2: control hints.
+    _text(frame, "SPACE: START / STOP RECORDING", (margin, int(54 * scale)), 0.55 * scale,
+          (198, 204, 216), 2)
+    _text(frame, "Q / ESC: QUIT", (0, int(54 * scale)), 0.55 * scale, (198, 204, 216), 2,
+          align_right=w - margin)
+
+    # Row 3: obvious recording status (pulsing dot + colored text) and timing.
+    row3_y = int(82 * scale)
+    text_y = row3_y - 12
+    if recording:
+        pulse = 7 + int(abs(math.sin(time.monotonic() * 6.0)) * 4)
+        cv2.circle(frame, (margin + 6, row3_y), pulse, (60, 60, 255), -1)
+        cv2.circle(frame, (margin + 6, row3_y), pulse, (255, 255, 255), 2)
+        status_txt, status_color = "STATUS: RECORDING", (70, 120, 255)
+    else:
+        cv2.circle(frame, (margin + 6, row3_y), 6, (110, 120, 140), -1)
+        status_txt, status_color = "STATUS: PAUSED", (120, 200, 255)
+    _text(frame, status_txt, (margin + 20, text_y), 0.62 * scale, status_color, 2)
+
+    interval_txt = f"INTERVAL: {interval:g}s"
+    elapsed_txt = f"ELAPSED {elapsed:5.1f}s" if recording else "ELAPSED --"
+    (int_w, _), _ = cv2.getTextSize(interval_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.55 * scale, 2)
+    (el_w, _), _ = cv2.getTextSize(elapsed_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.55 * scale, 2)
+    _text(frame, interval_txt, (0, text_y), 0.55 * scale, (198, 204, 216), 2,
+          align_right=w - margin - el_w - 56)
+    _text(frame, elapsed_txt, (0, text_y), 0.55 * scale, (198, 204, 216), 2,
+          align_right=w - margin)
+
+    # A bright red border around the whole frame while recording makes the
+    # state obvious even from across the room.
+    if recording:
+        cv2.rectangle(frame, (3, 3), (w - 4, h - 4), (40, 90, 255), 4)
 
 
 def main(argv: list[str] | None = None) -> int:

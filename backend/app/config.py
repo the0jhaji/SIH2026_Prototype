@@ -34,10 +34,30 @@ CAMERA_MOCK = _env_bool("CAMERA_MOCK")
 CAMERA_JPEG_QUALITY = int(os.environ.get("CAMERA_JPEG_QUALITY", "70"))
 
 # Object detection (Phase 3). OFF by default so the app boots without any
-# model weights. Enable with DETECTION_ENABLED=true and pick the backend with
-# DETECTION_BACKEND=mock|yolo.
+# model weights. Enable with DETECTION_ENABLED=true and pick the backend:
+#   mock      -> deterministic demo detections (person/red_box/yellow_box)
+#   yolo      -> your trained YOLO ONNX in models/detection/ (Phase 4C)
+#   heuristic -> model-free HSV color + motion detection, no weights needed
 DETECTION_ENABLED = _env_bool("DETECTION_ENABLED")
 DETECTION_BACKEND = os.environ.get("DETECTION_BACKEND", "mock").strip().lower()
 DETECTION_MODEL_PATH = os.environ.get("DETECTION_MODEL_PATH", "detection/yolov8n.onnx")
 DETECTION_CONF_THRESHOLD = float(os.environ.get("DETECTION_CONF_THRESHOLD", "0.5"))
 DETECTION_POLL_MS = int(os.environ.get("DETECTION_POLL_MS", "100"))
+
+# Activity perception stage (Phase 5C bridge). Chooses which source feeds the
+# state machine at runtime.
+#   live -> the camera-grounded LiveActivityPerception (DEFAULT): emits a step
+#           only when it actually sees the step's expectedObjects on camera.
+#   mock -> deterministic MockActivityPerception (data-driven from the loaded
+#           experiment, clearly labeled as mock — demos without vision).
+#   sim  -> the original scripted SimulatedPerception (tests/backwards compat).
+ACTIVITY_BACKEND = os.environ.get("ACTIVITY_BACKEND", "live").strip().lower()
+# Live mode: accepted gap (ms) since the last camera inference before the scene
+# is stale. Stopped camera / frozen feed / disabled detector -> experiment waits.
+ACTIVITY_STALE_MS = int(os.environ.get("ACTIVITY_STALE_MS", "5000"))
+# Base pacing (ms) between live perception polls.
+ACTIVITY_POLL_MS = int(os.environ.get("ACTIVITY_POLL_MS", "700"))
+
+# Optional absolute path to an experiment JSON. When unset, load_active_experiment
+# prefers the canonical experiment/experiment.json, falling back to EXPERIMENTS_DIR.
+EXPERIMENT_FILE = os.environ.get("EXPERIMENT_FILE", "").strip()

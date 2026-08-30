@@ -18,7 +18,7 @@ export default function App() {
   const cameraRunning = camera.info?.running === true
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200">
+    <div className="min-h-screen bg-slate-100 text-slate-800 dark:bg-slate-950 dark:text-slate-200">
       <Header
         state={state}
         mode={mode}

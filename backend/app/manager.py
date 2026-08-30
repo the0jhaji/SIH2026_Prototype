@@ -5,7 +5,7 @@ from typing import Set
 
 from fastapi import WebSocket
 
-logger = logging.getLogger("basai.ws")
+logger = logging.getLogger("astraai.ws")
 
 
 class ConnectionManager:

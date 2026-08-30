@@ -3,7 +3,7 @@
 Reads a local ``.onnx`` model — never downloads anything. Export a trained
 model with e.g. ``yolo export model=yolov8n.pt format=onnx`` and drop the
 file into ``models/yolo/`` (see ``models/README.md``). The default class list
-matches the BAS-AI scene; supply a different list if your model uses other
+matches the Astra AI scene; supply a different list if your model uses other
 indices.
 """
 
@@ -19,7 +19,7 @@ import numpy as np
 from .base import BaseDetector
 from .detections import Box, ObjectDetection
 
-#: BAS-AI scene classes, index-aligned with a 5-class YOLO model.
+#: Astra AI scene classes, index-aligned with a 5-class YOLO model.
 DEFAULT_CLASSES = ["person", "experiment_box", "red_box", "yellow_box", "target_area"]
 
 DEFAULT_MODEL = "yolov8n.onnx"

@@ -45,6 +45,11 @@ class StepDef(BaseModel):
     label: str
     action: ActionKind = None
     object: ObjectKind = None
+    # Canonical experiment contract (experiment/experiment.json).
+    order: Optional[int] = None
+    description: str = ""
+    terminal: bool = False
+    expectedObjects: list[str] = Field(default=[], alias="expectedObjects")
 
 
 class ExperimentDef(BaseModel):
@@ -54,6 +59,17 @@ class ExperimentDef(BaseModel):
     name: str
     description: str = ""
     steps: list[StepDef]
+    # Canonical experiment contract (experiment/experiment.json). Every field
+    # is optional so the legacy demo definitions still load unchanged.
+    schemaVersion: str = ""
+    prototype: bool = False
+    disclaimer: str = ""
+    initialState: dict[str, object] = {}
+    objects: list[dict[str, object]] = []
+    activities: list[str] = []
+    validationRules: dict[str, object] = {}
+    errorTypes: list[dict[str, object]] = []
+    example: dict[str, object] = {}
 
 
 class ExpEvent(BaseModel):

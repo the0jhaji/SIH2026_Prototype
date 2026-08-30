@@ -1,4 +1,4 @@
-"""dataset — local capture tooling for building the BAS-AI custom dataset.
+"""dataset — local capture tooling for building the Astra AI custom dataset.
 
 Everything is stored locally and never uploaded. Structure:
 

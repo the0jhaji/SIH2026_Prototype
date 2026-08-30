@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BAS Dataset Annotator</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header id="topbar">
+    <h1>BAS Dataset Annotator</h1>
+    <div id="progress">
+      <span id="progress-text">Annotated: 0 / 0 &middot; Progress: 0%</span>
+      <span id="progress-track"><span id="progress-bar"></span></span>
+    </div>
+  </header>
+
+  <main id="layout">
+    <section id="viewport">
+      <div id="canvas-wrap">
+        <canvas id="canvas"></canvas>
+        <div id="empty-msg" class="hidden">
+          No images found in <code>dataset/raw/</code> yet.<br>
+          Record some first, then reload this page.
+        </div>
+      </div>
+    </section>
+
+    <aside id="sidebar">
+      <h2>Classes <small>(click = draw / change selected)</small></h2>
+      <ul id="legend"></ul>
+
+      <h2>Actions</h2>
+      <div id="actions">
+        <button id="btn-prev" title="Previous image">&#8592; Prev (P)</button>
+        <button id="btn-next" title="Next image">Next (N) &#8594;</button>
+        <button id="btn-save" class="primary" title="Save YOLO label">Save (S)</button>
+        <button id="btn-delete" title="Delete selected box">Delete box (D)</button>
+        <button id="btn-clear" title="Clear all boxes">Clear (C)</button>
+        <button id="btn-quit" title="Close the tab">Quit (Q)</button>
+      </div>
+
+      <div id="image-info">
+        <code id="current-path">&mdash;</code>
+        <div id="box-count">0 boxes</div>
+      </div>
+
+      <div id="hints">
+        <div><b>Draw:</b> drag on the image</div>
+        <div><b>Select:</b> click a box</div>
+        <div><b>Shortcuts:</b> N next &middot; P prev &middot; S save &middot; D delete &middot; C clear &middot; Q quit</div>
+        <div><b>Class keys:</b> 0&ndash;9 (changes the selected box, else the draw class)</div>
+      </div>
+    </aside>
+  </main>
+
+  <div id="toast" class="hidden"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

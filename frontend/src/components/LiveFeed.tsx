@@ -366,7 +366,7 @@ export function SimulatedFeed({ state }: { state: ExperimentState }) {
   }, [])
 
   return (
-    <div className="relative overflow-hidden rounded-lg border border-slate-800 bg-slate-950">
+    <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-slate-200 dark:border-slate-800 dark:bg-slate-950">
       <canvas ref={canvasRef} className="block aspect-video w-full" />
     </div>
   )
@@ -386,7 +386,7 @@ export function LiveCameraFeed({
 }) {
   const showBoxes = frameWidth != null && frameHeight != null && frameWidth > 0 && frameHeight > 0
   return (
-    <div className="relative overflow-hidden rounded-lg border border-slate-800 bg-slate-950">
+    <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-slate-200 dark:border-slate-800 dark:bg-slate-950">
       <img
         src={streamUrl}
         alt="Live camera feed"

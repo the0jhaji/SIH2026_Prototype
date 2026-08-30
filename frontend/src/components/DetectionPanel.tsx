@@ -15,10 +15,10 @@ interface Props {
 }
 
 const STATUS_CHIP: Record<string, string> = {
-  disabled: 'border-slate-600/60 bg-slate-800/60 text-slate-400',
-  idle: 'border-amber-500/50 bg-amber-950/60 text-amber-300',
-  ok: 'border-emerald-500/50 bg-emerald-950/60 text-emerald-300',
-  error: 'border-rose-500/50 bg-rose-950/60 text-rose-300',
+  disabled: 'border-slate-300/70 bg-slate-200/70 text-slate-600 dark:border-slate-600/60 dark:bg-slate-800/60 dark:text-slate-400',
+  idle: 'border-amber-500/50 bg-amber-100/70 text-amber-700 dark:border-amber-500/50 dark:bg-amber-950/60 dark:text-amber-300',
+  ok: 'border-emerald-500/50 bg-emerald-100/70 text-emerald-700 dark:border-emerald-500/50 dark:bg-emerald-950/60 dark:text-emerald-300',
+  error: 'border-rose-500/50 bg-rose-100/70 text-rose-700 dark:border-rose-500/50 dark:bg-rose-950/60 dark:text-rose-300',
 }
 
 export function DetectionPanel({ status, result, offline, cameraRunning }: Props) {
@@ -27,9 +27,9 @@ export function DetectionPanel({ status, result, offline, cameraRunning }: Props
   const detections = result?.detections ?? []
 
   return (
-    <section className="rounded-lg border border-slate-800 bg-slate-900/70 p-4">
+    <section className="panel p-4">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+        <h2 className="heading-title">
           Object Detection
         </h2>
         <span
@@ -40,25 +40,25 @@ export function DetectionPanel({ status, result, offline, cameraRunning }: Props
       </div>
 
       <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-        <div className="rounded-md bg-slate-800/60 px-2 py-1.5">
-          <p className="text-[10px] uppercase tracking-wider text-slate-500">Detector</p>
-          <p className="font-mono text-sm font-semibold text-slate-200">
+        <div className="tile px-2 py-1.5">
+          <p className="overline-label">Detector</p>
+          <p className="copy-value">
             {status?.detector ?? '—'}
           </p>
         </div>
-        <div className="rounded-md bg-slate-800/60 px-2 py-1.5">
-          <p className="text-[10px] uppercase tracking-wider text-slate-500">Model</p>
+        <div className="tile px-2 py-1.5">
+          <p className="overline-label">Model</p>
           <p
             className={`font-mono text-sm font-semibold ${
-              status?.modelLoaded ? 'text-emerald-300' : 'text-slate-400'
+              status?.modelLoaded ? 'text-emerald-600 dark:text-emerald-300' : 'text-slate-500 dark:text-slate-400'
             }`}
           >
             {status ? (status.modelLoaded ? 'LOADED' : 'MISSING') : '—'}
           </p>
         </div>
-        <div className="rounded-md bg-slate-800/60 px-2 py-1.5">
-          <p className="text-[10px] uppercase tracking-wider text-slate-500">Objects</p>
-          <p className="font-mono text-sm font-semibold text-slate-200">
+        <div className="tile px-2 py-1.5">
+          <p className="overline-label">Objects</p>
+          <p className="copy-value">
             {enabled ? String(status?.detectionCount ?? 0) : '—'}
           </p>
         </div>
@@ -66,11 +66,11 @@ export function DetectionPanel({ status, result, offline, cameraRunning }: Props
 
       <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
         <span>
-          Last inference: <span className="font-mono text-slate-300">{ago(result?.lastInferenceMs ?? null)}</span>
+          Last inference: <span className="font-mono text-slate-700 dark:text-slate-300">{ago(result?.lastInferenceMs ?? null)}</span>
         </span>
         {result?.inferenceMs != null && (
           <span>
-            <span className="font-mono text-slate-300">{result.inferenceMs}ms</span> / frame
+            <span className="font-mono text-slate-700 dark:text-slate-300">{result.inferenceMs}ms</span> / frame
           </span>
         )}
       </div>
@@ -80,28 +80,28 @@ export function DetectionPanel({ status, result, offline, cameraRunning }: Props
           {detections.map((d, i) => (
             <li
               key={i}
-              className="flex items-center justify-between rounded-md bg-slate-800/50 px-2.5 py-1 font-mono text-xs"
+              className="flex items-center justify-between rounded-md bg-slate-100 px-2.5 py-1 font-mono text-xs dark:bg-slate-800/50"
             >
-              <span className="font-semibold tracking-wide text-slate-200">
+              <span className="font-semibold tracking-wide text-slate-800 dark:text-slate-200">
                 {d.class_name.replace(/_/g, ' ').toUpperCase()}
               </span>
-              <span className="text-slate-400">{Math.round(d.confidence * 100)}%</span>
+              <span className="text-slate-500 dark:text-slate-400">{Math.round(d.confidence * 100)}%</span>
             </li>
           ))}
         </ul>
       )}
 
       {enabled && detections.length === 0 && !cameraRunning && (
-        <p className="mt-2 text-xs text-amber-300">Waiting for the camera to stream frames…</p>
+        <p className="mt-2 text-xs text-amber-600 dark:text-amber-300">Waiting for the camera to stream frames…</p>
       )}
       {offline && (
-        <p className="mt-2 text-xs text-amber-300">Backend unreachable — detection unavailable.</p>
+        <p className="mt-2 text-xs text-amber-600 dark:text-amber-300">Backend unreachable — detection unavailable.</p>
       )}
-      {status?.error && <p className="mt-2 text-xs text-rose-300">{status.error}</p>}
+      {status?.error && <p className="mt-2 text-xs text-rose-600 dark:text-rose-300">{status.error}</p>}
       {!enabled && !status?.error && (
         <p className="mt-2 text-xs text-slate-500">
-          Detection is disabled. Restart the backend with <code className="text-slate-400">DETECTION_ENABLED=true</code>{' '}
-          (<code className="text-slate-400">DETECTION_BACKEND=mock|yolo</code>).
+          Detection is disabled. Restart the backend with <code className="text-slate-600 dark:text-slate-400">DETECTION_ENABLED=true</code>{' '}
+          (<code className="text-slate-600 dark:text-slate-400">DETECTION_BACKEND=mock|yolo|heuristic</code>).
         </p>
       )}
     </section>

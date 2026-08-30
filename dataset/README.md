@@ -1,6 +1,6 @@
 # dataset/ — Local BAS experiment dataset
 
-Collects a **custom, local-only** dataset for training the BAS-AI object
+Collects a **custom, local-only** dataset for training the Astra AI object
 detector (the phase after this one). Everything stays on this machine — there
 is **no upload, no cloud, no network dependency** in the recorder.
 
@@ -10,10 +10,20 @@ is **no upload, no cloud, no network dependency** in the recorder.
 | --- | --- |
 | `raw/`             | untouched recording **sessions** (one directory per take) |
 | `frames/`          | curated/organized frames ready for training (filled in a later phase) |
-| `annotations/`     | label files (`YOLO`-style) for the curated frames (later phase) |
-| `scripts/record_dataset.py` | recorder CLI |
-| `dataset_tool.py`  | shared logic: session creation, metadata, manifest (pure, testable) |
-| `tests/`           | session + configuration tests (no camera/device needed) |
+| `annotations/`     | YOLO label files mirroring `raw/` paths (`class cx cy w h`, normalized 0–1) |
+| `train/ val/ test/`| **session-aware** split output (created by `prepare_split.py`) |
+| `scripts/record_dataset.py` | recorder CLI (Phase 4A) |
+| `activity/` | activity dataset: `activity/<ACTIVITY>/session_*/` (JPEG + manifest + metadata) |
+| `scripts/record_activity.py` | activity recorder CLI (Phase 5B) |
+| `scripts/prepare_split.py`  | split raw+annotations into train/val/test by session (Phase 4B) |
+| `scripts/validate_dataset.py` | dataset + split validation CLI (Phase 4B) |
+| `scripts/export_training.py` | write a validated ultralytics `data.yaml` from the split (Phase 4C) |
+| `scripts/install_detection_model.py` | install a trained ONNX + `.names` into `models/detection/` (Phase 4C) |
+| `training_tool.py`  | shared Phase 4C logic: data.yaml export, class histogram, model install (pure, testable) |
+| `requirements-train.txt` | **optional** ultralytics trainer env (runtime never needs it) |
+| `dataset_tool.py`  | shared capture logic: session creation, metadata, manifest (pure, testable) |
+| `annotation/`      | dev-only browser annotation tool (stdlib `http.server`, no new deps) + `annotator.py` shared logic |
+| `tests/`           | session/config + annotation/split/validation tests (no camera/device needed) |
 
 ## Requirements
 
@@ -80,7 +90,177 @@ self-describing.
 - The recorder never alters `dataset/raw/` sessions; curation and labeling
   happen in later phases into `frames/` + `annotations/`.
 
-## Tests
+## Annotating (Phase 4B)
+
+A small browser tool annotates the raw frames **locally** — no cloud, no
+external API, no AI API. It is independent of the production BAS app.
+
+```powershell
+.\.venv\Scripts\python.exe dataset\annotation\app.py        # backend venv, repo root
+# opens http://127.0.0.1:8700 ; Ctrl+C stops the server
+```
+
+Controls: drag to draw a box · click a box to select it · legends/number keys
+`0`–`4` set the draw class or change the selected box's class.
+
+| Key | Action |
+| --- | --- |
+| `N` | next image |
+| `P` | previous image |
+| `S` | save current image (YOLO label) |
+| `D` | delete selected box |
+| `C` | clear all boxes on the current image |
+| `Q` | close the tab |
+
+Saved labels land in `dataset/annotations/<session>/frame_XXXXXX.txt`
+(`class cx cy w h`, normalized 0–1), mirroring the `raw/` paths. The top bar
+shows `Annotated: X / Y · Progress: Z%`. The **class list is config data** in
+`dataset/annotation/classes.json`; edit it to add/rename classes (its index is
+the YOLO class id).
+
+Everything is validated on draw (min box size, clamped to the frame) and again
+server-side before saving (class id in range, coords in [0,1], positive size).
+
+## Dataset split (Phase 4B)
+
+`prepare_split.py` splits **whole recording sessions** — never individual
+frames from the same session across sets. Defaults to 70 / 20 / 10.
+
+```powershell
+.\.venv\Scripts\python.exe dataset\scripts\prepare_split.py --root dataset
+.\.venv\Scripts\python.exe dataset\scripts\prepare_split.py --root dataset --seed 7 --test 0.15
+```
+
+Output (originals are only copied, never modified):
+
+```
+dataset/train/{images,labels}/<session>/…      dataset/val/...      dataset/test/...
+dataset/split_manifest.json   # seed + session → split
+```
+
+## Validate dataset (Phase 4B)
+
+```powershell
+.\.venv\Scripts\python.exe dataset\scripts\validate_dataset.py --root dataset
+```
+
+Checks: image + label files exist, labels are well-formed YOLO with valid
+class ids, coordinates in [0,1], positive width/height, boxes inside the
+frame, no orphaned labels — and **session leakage** (one session across
+multiple splits). Prints a summary; exit code `0` = clean, `1` = errors.
+Splits with images that have no label file are reported as errors (blank
+labels are fine for intentionally empty frames).
+
+## Training export (Phase 4C)
+
+Bridges the annotated split to model training — and the trained model back to
+the running app. **No training happens here** (that needs ultralytics, which
+is kept out of the core venv); this validates the data and formats it exactly
+as the trainer expects.
+
+```powershell
+# 1. Export a validated data.yaml from the annotated split:
+.\\.venv\\Scripts\\python.exe dataset\\scripts\\export_training.py --root dataset
+#    -> dataset/training/data.yaml
+#    Exit 2 = not trainable yet: missing label files, out-of-range class ids,
+#    malformed boxes, or a session spanning more than one split.
+```
+
+The generated `data.yaml` points `path` at the dataset root and
+`train/val/test` at the `*/images` dirs, with `nc`/`names` from
+`annotation/classes.json` — index-aligned with the annotation tool. `test`
+is omitted when the split has no test images (train/val are always required).
+
+```powershell
+# 2. Train + export ONNX in a dedicated venv (see requirements-train.txt):
+.venv-train\\Scripts\\yolo train data=dataset\\training\\data.yaml model=yolov8n.pt epochs=200 imgsz=640
+.venv-train\\Scripts\\yolo export model=runs/detect/train/weights/best.pt format=onnx
+
+# 3. Install the ONNX + its .names for the runtime:
+.\\.venv\\Scripts\\python.exe dataset\\scripts\\install_detection_model.py --onnx runs/detect/train/weights/best.onnx
+#    -> models/detection/yolov8n.onnx + models/detection/yolov8n.names (from classes.json)
+
+# 4. Run the backend with DETECTION_ENABLED=true DETECTION_BACKEND=yolo; the
+#    runtime reads the ONNX and the .names file (ai/detection/yolo_detector.py).
+```
+
+Full flow, runtime config, and behavioural notes: `models/detection/README.md`.
+
+## Activity dataset (Phase 5B)
+
+Collects the **ACTION dataset** for a later activity-recognition +
+sequence-validation phase. Units are recordings of a single named activity
+(the 7-step box-handling experiment), captured with the same proven recorder
+style as the object dataset. Local-only, like everything else here.
+
+### Purpose
+
+The object dataset (`raw/`) teaches a detector to *see* boxes and the
+astronaut. The activity dataset (`activity/`) records *what is happening over
+time* — one activity per take — so a temporal model can classify
+`APPROACH … COMPLETE` actions from frame sequences. No AI inference and no
+training happen in this phase.
+
+### Directory structure
+
+Valid activity names are loaded from the **canonical
+`experiment/experiment.json`** definition (`activities` list) — the recorder
+and tests never hardcode the vocabulary. For each recorded take, one unique
+session directory is created:
+
+```
+dataset/activity/<ACTIVITY>/session_<timestamp>_<random>/
+    frame_000001.jpg   # one JPEG per interval tick
+    frame_000002.jpg
+    …
+    manifest.csv       # index, timestamp ISO, epoch-ms, filename
+    metadata.json      # activity, session id, started/ended, camera, interval, frame_count, source
+```
+
+### Recorder
+
+```powershell
+backend\.venv\Scripts\python.exe dataset\scripts\record_activity.py --activity PICK_RED --interval 0.1
+```
+
+`--activity` is required; choices come straight from `experiment/experiment.json`
+(an invalid name is rejected by the CLI). Flags match `record_dataset.py`:
+`--camera-index`, `--width`, `--height`, `--fps`, `--interval`, `--output`,
+`--mock`. The camera layer is reused from the backend
+(`backend/camera/capture.py`). The HUD shows the **activity name** up front,
+plus STATUS / SAVED / FPS / INTERVAL / ELAPSED; **SPACE** starts/stops
+recording, **Q/ESC** quits and writes final metadata.
+
+### Valid activities
+
+From `experiment/experiment.json` (prototype experiment — see disclaimer):
+
+| Activity | Meaning |
+| --- | --- |
+| `APPROACH` | astronaut enters the experiment area |
+| `OPEN_BOX` | main experiment box is opened |
+| `PICK_RED` | red box is picked up |
+| `PLACE_RED` | red box is placed into the target area |
+| `PICK_YELLOW` | yellow box is picked up |
+| `PLACE_YELLOW` | yellow box is placed into the target area |
+| `COMPLETE` | both boxes placed; experiment finished |
+
+### Recommended collection procedure
+
+- Record **multiple takes of the same activity** in different sessions (e.g.
+  5+ per activity) so a sequence/temporal model sees varied timing and poses.
+- Run one activity per take; keep each take focused (start the take just
+  before the action begins, stop just after it ends).
+- Use a low interval (e.g. `0.1s…0.5s`) for quick actions like pick/place.
+- Keep the same lab lighting / table layout as the object dataset so detector
+  features transfer.
+- This sequence is **your own prototype experiment definition**, inspired by
+  ISRO Problem Statement 26174. The official public description is truncated
+  after *"You are given a box that contains two smaller boxes of color red and
+  yellow…"*, so the labelled activities above are **not** an undisclosed
+  official ISRO sequence — do not present them as such.
+
+### Tests
 
 ```powershell
 backend\.venv\Scripts\python.exe -m pytest dataset\tests -q
@@ -88,4 +268,19 @@ backend\.venv\Scripts\python.exe -m pytest dataset\tests -q
 
 Covers configuration validation (mirroring the backend camera defaults),
 unique session creation, label slugging, `metadata.json` round-trips, the
-`manifest.csv` format, and directory layout. No camera or display needed.
+`manifest.csv` format, directory layout, YOLO label parsing, coordinate/class
+validation, the session-aware split, leakage detection, missing/malformed
+annotation detection, the **activity dataset** (canonical vocabulary from
+`experiment/experiment.json`, activity session creation, metadata + manifest,
+activity directory layout), and the **training export** (validated
+`data.yaml`, class histograms, ONNX + `.names` install). No camera or display
+needed.
+
+`overlay_smoke.py` is an **opt-in, interactive** camera check (not a pytest):
+it applies the recorder overlay to mock frames and, with `--camera <index>`,
+to a real webcam, and asserts the HUD pixels (band, status color, border) are
+genuinely drawn.
+
+```powershell
+backend\.venv\Scripts\python.exe dataset\overlay_smoke.py --camera 0
+```

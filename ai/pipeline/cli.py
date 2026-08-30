@@ -25,7 +25,7 @@ from .yolo import YoloDetector
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="BAS-AI perception pipeline preview")
+    parser = argparse.ArgumentParser(description="Astra AI perception pipeline preview")
     parser.add_argument("--detector", choices=["mock", "yolo"], default="mock")
     parser.add_argument("--model", default="yolov8n.onnx", help="YOLO ONNX filename in models/yolo/ (or absolute)")
     parser.add_argument("--source", choices=["webcam", "null"], default="webcam")
@@ -81,7 +81,7 @@ def _run_interaction(args: argparse.Namespace) -> int:
                         (0, 255, 255),
                         -1,
                     )
-            cv2.imshow("BAS-AI interaction preview", canvas)
+            cv2.imshow("Astra AI interaction preview", canvas)
             if cv2.waitKey(1) & 0xFF == 27:
                 stop.set()
     cv2.destroyAllWindows()
@@ -128,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
                 flush=True,
             )
         if not args.headless and df.annotated is not None:
-            cv2.imshow(f"BAS-AI perception preview ({detector.name})", df.annotated)
+            cv2.imshow(f"Astra AI perception preview ({detector.name})", df.annotated)
             if cv2.waitKey(1) & 0xFF == 27:  # ESC
                 stop.set()
 

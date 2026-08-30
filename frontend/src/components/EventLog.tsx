@@ -3,10 +3,10 @@ import type { BasEvent, EventSeverity } from '../domain/types'
 import { formatTimestamp } from '../lib/time'
 
 const LINE_STYLE: Record<EventSeverity, string> = {
-  ok: 'text-emerald-300',
-  error: 'text-rose-300',
-  warn: 'text-amber-300',
-  info: 'text-slate-300',
+  ok: 'text-emerald-600 dark:text-emerald-300',
+  error: 'text-rose-600 dark:text-rose-300',
+  warn: 'text-amber-600 dark:text-amber-300',
+  info: 'text-slate-700 dark:text-slate-300',
 }
 
 const KIND_TAG: Record<BasEvent['kind'], string> = {
@@ -31,23 +31,23 @@ export function EventLog({ events }: { events: BasEvent[] }) {
   }, [events.length])
 
   return (
-    <section className="rounded-lg border border-slate-800 bg-slate-900/70">
-      <div className="border-b border-slate-800 px-4 py-2">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+    <section className="panel">
+      <div className="border-b border-slate-200 px-4 py-2 dark:border-slate-800">
+        <h2 className="heading-title">
           Timestamped event log
         </h2>
       </div>
       <div className="h-64 overflow-y-auto px-4 py-2 font-mono text-xs">
         {events.length === 0 ? (
-          <p className="py-6 text-center text-slate-600">
+          <p className="py-6 text-center text-slate-400 dark:text-slate-600">
             No events yet. Start an experiment to begin logging.
           </p>
         ) : (
           events.map(ev => (
-            <div key={ev.seq} className="flex items-baseline gap-2 border-b border-slate-800/40 py-1 last:border-0">
-              <span className="shrink-0 tabular-nums text-slate-600">{formatTimestamp(ev.ts)}</span>
+            <div key={ev.seq} className="flex items-baseline gap-2 border-b border-slate-200/70 py-1 last:border-0 dark:border-slate-800/40">
+              <span className="shrink-0 tabular-nums text-slate-400 dark:text-slate-600">{formatTimestamp(ev.ts)}</span>
               <span
-                className={`shrink-0 rounded bg-slate-800/80 px-1.5 py-px text-[10px] font-bold tracking-wide ${LINE_STYLE[ev.severity]}`}
+                className={`shrink-0 rounded bg-slate-200/90 px-1.5 py-px text-[10px] font-bold tracking-wide dark:bg-slate-800/80 ${LINE_STYLE[ev.severity]}`}
               >
                 {KIND_TAG[ev.kind]}
               </span>

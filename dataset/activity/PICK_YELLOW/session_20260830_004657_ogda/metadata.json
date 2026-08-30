@@ -1,0 +1,18 @@
+{
+  "schema": "bas-activity-session/1",
+  "activity": "PICK_YELLOW",
+  "session_id": "20260830_004657_ogda",
+  "started_at": "2026-08-30T00:46:57+05:30",
+  "ended_at": "2026-08-30T00:47:13+05:30",
+  "camera": {
+    "index": 0,
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "mock": false
+  },
+  "frame_count": 68,
+  "interval": 0.1,
+  "source": "webcam",
+  "storage": "local-only; never uploaded"
+}

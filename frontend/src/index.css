@@ -1,1 +1,29 @@
 @import "tailwindcss";
+
+/* Theme is handled by the `.dark` class on <html> (light is the default,
+   dark the previous look). Set by the inline script in index.html + the
+   useTheme hook, persisted under `astra-theme` in localStorage. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer components {
+  /* Card surface used by every panel in the dashboard. */
+  .panel {
+    @apply rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/70;
+  }
+  /* Inner info tile (Source / Resolution / Frames / detector rows). */
+  .tile {
+    @apply rounded-md bg-slate-100 dark:bg-slate-800/60;
+  }
+  /* Uppercase section title. */
+  .heading-title {
+    @apply text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400;
+  }
+  /* Tiny uppercase field label inside tiles. */
+  .overline-label {
+    @apply text-[10px] uppercase tracking-wider text-slate-500;
+  }
+  /* Monospace value shown inside tiles. */
+  .copy-value {
+    @apply font-mono text-sm font-semibold text-slate-800 dark:text-slate-200;
+  }
+}

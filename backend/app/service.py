@@ -1,18 +1,17 @@
-"""Experiment service: orchestrates the session, simulator, log store and
-WebSocket broadcasters. This is the seam where the simulator is replaced by
-the real perception pipeline."""
+"""Experiment service: orchestrates the session, perception source, log store
+and WebSocket broadcasters. This is the seam where the simulator is replaced by
+the real perception pipeline — any source exposing ``detections()`` works."""
 
 import asyncio
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from .log_store import LogStore
 from .manager import ConnectionManager
-from .schemas import Detection, ExperimentDef
-from .simulator import SimulatedPerception
+from .schemas import ExperimentDef
 from .state_machine import ExperimentSession
 
-logger = logging.getLogger("basai.service")
+logger = logging.getLogger("astraai.service")
 
 
 class ExperimentService:
@@ -34,16 +33,19 @@ class ExperimentService:
             await self.manager.broadcast({"type": "event", "data": payload})
         await self.manager.broadcast({"type": "state", "data": self.snapshot()})
 
-    async def start(self, simulator: SimulatedPerception) -> dict:
+    async def start(self, perception: Any) -> dict:
         async with self._lock:
             if self.task and not self.task.done():
                 return self.snapshot()
+            reset = getattr(perception, "reset", None)
+            if reset is not None:
+                reset()  # e.g. LiveActivityPerception: clear per-step state
             events = self.session.start()
             await self._publish(events)
 
             async def run() -> None:
                 try:
-                    async for detection in simulator.detections():
+                    async for detection in perception.detections():
                         payload = detection.model_dump()
                         await self.manager.broadcast({"type": "detection", "data": payload})
                         await self._publish(self.session.on_detection(detection))
@@ -52,7 +54,7 @@ class ExperimentService:
                 except asyncio.CancelledError:
                     raise
                 except Exception:  # noqa: BLE001
-                    logger.exception("Simulator task failed")
+                    logger.exception("Perception task failed")
 
             self.task = asyncio.create_task(run())
             return self.snapshot()

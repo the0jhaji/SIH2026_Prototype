@@ -1,4 +1,4 @@
-"""BAS-AI FastAPI backend.
+"""Astra AI backend.
 
 REST control plane + WebSocket event stream. The state machine is the only
 authority on step validity; the simulated perception source feeds it the same
@@ -30,6 +30,7 @@ from fastapi.responses import Response, StreamingResponse
 from camera import CameraManager, CameraSettings
 
 from . import config
+from .activity_perception import LiveActivityPerception, MockActivityPerception
 from .detection_service import DetectionService
 from .experiment import load_active_experiment
 from .log_store import LogStore
@@ -57,36 +58,70 @@ def create_app(
     sim_script: Optional[list] = None,
     camera: Optional[CameraSettings] = None,
     detector=None,
+    activity_backend: Optional[str] = None,
+    detection_service=None,
 ) -> FastAPI:
     """Build the FastAPI app.
 
     ``detector`` injects a ready-made ``ai.detection`` detector (tests use a
     mock); when omitted the app follows the ``DETECTION_*`` config env vars.
+    ``detection_service`` injects the whole service (tests use a stub with a
+    ``latest()``/``status()`` contract); when omitted it is built internally.
+
+    ``activity_backend`` (``mock`` | ``live`` | ``sim``) overrides
+    ``ACTIVITY_BACKEND`` for tests; when ``sim_script`` is injected the
+    simulator is always used so existing callers keep the scripted feed.
     """
     exp = experiment or load_active_experiment()
     manager = ConnectionManager()
     store = LogStore()
     service = ExperimentService(exp, manager, store)
     simulator = SimulatedPerception(sim_script)
+    # A sim_script explicitly opts into the scripted feed; otherwise the
+    # ACTIVITY_BACKEND config picks the perception source.
+    perception_backend = (
+        "sim" if sim_script is not None else (activity_backend or config.ACTIVITY_BACKEND)
+    ).strip().lower()
+    mock_perception = MockActivityPerception(exp, config.ACTIVITY_POLL_MS)
     camera_manager = CameraManager(camera or camera_settings_from_config())
-    detection_service = DetectionService(
-        camera_manager,
-        detector=detector,
-        enabled=config.DETECTION_ENABLED or detector is not None,
-        kind=config.DETECTION_BACKEND,
-        model_path=config.DETECTION_MODEL_PATH,
+    if detection_service is None:
+        detection_service = DetectionService(
+            camera_manager,
+            detector=detector,
+            enabled=config.DETECTION_ENABLED or detector is not None,
+            kind=config.DETECTION_BACKEND,
+            model_path=config.DETECTION_MODEL_PATH,
+            conf_threshold=config.DETECTION_CONF_THRESHOLD,
+            poll_ms=config.DETECTION_POLL_MS,
+        )
+    live_perception = LiveActivityPerception(
+        exp,
+        detection_service,
+        poll_ms=config.ACTIVITY_POLL_MS,
         conf_threshold=config.DETECTION_CONF_THRESHOLD,
-        poll_ms=config.DETECTION_POLL_MS,
+        stale_after_ms=config.ACTIVITY_STALE_MS,
+        current_index=lambda: service.session.current_step_index,
     )
+
+    sources = {
+        "mock": mock_perception,
+        "live": live_perception,
+        "sim": simulator,
+    }
+
+    def perception_source():
+        return sources.get(perception_backend, live_perception)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         yield
         await service.stop()
-        detection_service.close()
+        close = getattr(detection_service, "close", None)
+        if close is not None:
+            close()
         camera_manager.close()
 
-    app = FastAPI(title="BAS-AI Backend", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Astra AI Backend", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -99,6 +134,8 @@ def create_app(
     )
     app.state.service = service
     app.state.simulator = simulator
+    app.state.mock_perception = mock_perception
+    app.state.live_perception = live_perception
     app.state.camera_manager = camera_manager
     app.state.detection_service = detection_service
 
@@ -108,7 +145,7 @@ def create_app(
     async def health() -> dict:
         return {
             "status": "ok",
-            "source": simulator.name,
+            "source": perception_source().name,
             "experiment_id": exp.id,
             "clients": manager.count(),
             "camera_status": camera_manager.status.value,
@@ -124,7 +161,7 @@ def create_app(
 
     @app.post("/api/experiment/start")
     async def start() -> dict:
-        return await service.start(simulator)
+        return await service.start(perception_source())
 
     @app.post("/api/experiment/stop")
     async def stop() -> dict:

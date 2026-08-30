@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-logger = logging.getLogger("basai.detection")
+logger = logging.getLogger("astraai.detection")
 
 # Make the repo root importable so `ai.detection` resolves from the backend venv.
 _ROOT = Path(__file__).resolve().parent.parent.parent
@@ -48,7 +48,7 @@ class DetectionService:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        self._enabled = enabled and (detector is not None or kind in {"mock", "yolo"})
+        self._enabled = enabled and (detector is not None or kind in {"mock", "yolo", "heuristic"})
         self._kind = kind
         self._model_path = model_path
         self._conf_threshold = conf_threshold
@@ -85,7 +85,7 @@ class DetectionService:
         self._stop.clear()
         self._thread = threading.Thread(
             target=self._run,
-            name="basai-detection",
+            name="astraai-detection",
             daemon=True,
         )
         self._thread.start()

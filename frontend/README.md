@@ -1,6 +1,6 @@
-# BAS-AI frontend
+# Astra AI frontend
 
-React + Vite + TypeScript + Tailwind dashboard for the BAS-AI experiment
+React + Vite + TypeScript + Tailwind dashboard for the Astra AI experiment
 assistant. See the repository `README.md` for architecture and how to run.
 
 ## Scripts

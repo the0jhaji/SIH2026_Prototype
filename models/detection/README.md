@@ -20,7 +20,7 @@ The default model path (override anytime with `DETECTION_MODEL_PATH`) is:
 
 ## Class names
 
-Default classes (index-aligned with the BAS-AI 5-class model), bit-identical
+Default classes (index-aligned with the Astra AI 5-class model), bit-identical
 to the pipeline's `DEFAULT_CLASSES`:
 
 ```
@@ -35,16 +35,61 @@ If a `.names` file (one class per line) sits **next to the ONNX file** — e.g.
 A **generic pretrained YOLO model (COCO, etc.) does not recognise these
 experiment-specific classes** — COCO has `person` but not `red_box`,
 `yellow_box`, `experiment_box`, or `target_area`, and its boxes don't match
-anything the state machine consumes. For a real pipeline you must:
+anything the state machine consumes. For a real pipeline you must train your
+own model.
 
-1. collect/label BAS-AI footage,
-2. train (or fine-tune) a model with the 5 classes above,
-3. export to ONNX and drop it here.
+Until then, two honest no-weights paths exist:
 
-Until then, `DETECTION_BACKEND=mock` is the honest demo path: it emits
-deterministic `person 0.95 / red_box 0.91 / yellow_box 0.89` detections on the
-live camera feed so the dashboard, API, and overlays work end-to-end without
-weights.
+- `DETECTION_BACKEND=heuristic` — real pixels, no model: `person` from motion,
+  `red_box`/`yellow_box` from saturated colour. Works live; imperfect on skin
+  tones/shadowing, and it deliberately never claims the `experiment_box` or
+  `target_area` classes (only a trained model sees those).
+- `DETECTION_BACKEND=mock` — deterministic `person 0.95 / red_box 0.91 /
+  yellow_box 0.89` demos so the dashboard, API, and overlays work end-to-end
+  without weights.
+
+Either way, the activity feed (`ACTIVITY_BACKEND=live`, the default) will wait
+honestly at any step whose `expectedObjects` includes `experiment_box` /
+`target_area` until the trained YOLO model is installed below — the experiment
+never completes out of thin air.
+
+## Training pipeline (Phase 4C)
+
+The repo already carries the full loop from annotated dataset to a runtime
+model. Everything is local — nothing is downloaded or uploaded.
+
+```powershell
+# 1. Collect + annotate (dataset/README.md: record_dataset.py -> annotation/app.py),
+#    then produce the session-aware split:
+.\\.venv\\Scripts\\python.exe dataset\\scripts\\prepare_split.py --root dataset
+.\\.venv\\Scripts\\python.exe dataset\\scripts\\validate_dataset.py --root dataset
+
+# 2. Export a validated ultralytics data.yaml from the split:
+.\\.venv\\Scripts\\python.exe dataset\\scripts\\export_training.py --root dataset
+#    -> dataset/training/data.yaml  (fails with exit 2 on missing labels or
+#       cross-split session leakage; never splits a session across sets)
+
+# 3. Train + export (dedicated venv, this file's neighbour keeps the core venv lean):
+python -m venv .venv-train
+.venv-train\\Scripts\\pip install -r dataset\\requirements-train.txt
+.venv-train\\Scripts\\yolo train data=dataset\\training\\data.yaml model=yolov8n.pt epochs=200 imgsz=640
+.venv-train\\Scripts\\yolo export model=runs/detect/train/weights/best.pt format=onnx
+
+# 4. Install the export for the runtime (copies ONNX + writes the .names file
+#    straight from annotation/classes.json, so class ids always match):
+.\\.venv\\Scripts\\python.exe dataset\\scripts\\install_detection_model.py \\
+    --onnx runs/detect/train/weights/best.onnx
+
+# 5. Run the backend with the trained model:
+$env:DETECTION_ENABLED="true"; $env:DETECTION_BACKEND="yolo"
+.\\.venv\\Scripts\\python.exe -m uvicorn app.main:app --port 8000 --reload --app-dir backend
+#    GET /api/detection/status -> modelLoaded=true and your trained classes
+```
+
+`install_detection_model.py` and the runtime detector agree on one contract:
+a `.names` file (one class per line, index-aligned) sitting next to the ONNX
+overrides the default class list. The `.names` file is the training
+vocabulary, so you never hand-edit a class list in code.
 
 ## Behaviour when missing
 
