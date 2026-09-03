@@ -5,25 +5,115 @@
    useTheme hook, persisted under `astra-theme` in localStorage. */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Material-inspired space theme. All border radii are 0 (sharp). Fonts:
+   Inter for headlines/body, JetBrains Mono for data/labels. */
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --color-primary: #4cd7f6;
+  --color-primary-container: #06b6d4;
+  --color-on-primary: #002d35;
+  --color-on-primary-container: #00272e;
+
+  --color-secondary: #ffb95f;
+  --color-secondary-container: #ee9800;
+  --color-on-secondary: #342300;
+  --color-on-secondary-container: #2d1f00;
+
+  --color-tertiary: #ffb3ad;
+  --color-error: #ffb4ab;
+  --color-error-container: #93000a;
+
+  --color-surface: #131314;
+  --color-on-surface: #e5e2e3;
+  --color-on-surface-variant: #bcc9cd;
+  --color-surface-container: #201f20;
+  --color-surface-container-high: #2a2a2b;
+  --color-surface-container-lowest: #0e0e0f;
+  --color-surface-container-low: #1c1b1c;
+
+  --color-outline: #869397;
+  --color-outline-variant: #3d494c;
+
+  --color-bg: #0b0f14;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    background: var(--color-bg);
+    color: var(--color-on-surface);
+  }
+  body {
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+  select {
+    background-image: none;
+  }
+}
+
 @layer components {
-  /* Card surface used by every panel in the dashboard. */
+  /* Card surface used by every panel in the dashboard. Sharp corners. */
   .panel {
-    @apply rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/70;
+    @apply border border-[#3d494c]/50 bg-surface-container text-on-surface dark:border-outline-variant/50;
   }
   /* Inner info tile (Source / Resolution / Frames / detector rows). */
   .tile {
-    @apply rounded-md bg-slate-100 dark:bg-slate-800/60;
+    @apply bg-surface-container-high/70;
   }
   /* Uppercase section title. */
   .heading-title {
-    @apply text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400;
+    @apply font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-on-surface-variant;
   }
   /* Tiny uppercase field label inside tiles. */
   .overline-label {
-    @apply text-[10px] uppercase tracking-wider text-slate-500;
+    @apply font-mono text-[10px] uppercase tracking-[0.1em] text-on-surface-variant;
   }
   /* Monospace value shown inside tiles. */
   .copy-value {
-    @apply font-mono text-sm font-semibold text-slate-800 dark:text-slate-200;
+    @apply font-mono text-sm font-semibold text-on-surface;
+  }
+  /* Material symbol icon helper. */
+  .msym {
+    font-family: "Material Symbols Outlined";
+    font-weight: normal;
+    font-style: normal;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-block;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    font-feature-settings: "liga";
+    -webkit-font-smoothing: antialiased;
+  }
+  /* Primary filled button (sharp). */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 border border-primary-container bg-primary-container px-4 py-2 font-mono text-xs font-bold uppercase tracking-wider text-on-primary-container transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  /* Secondary outline button (sharp). */
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2 border border-primary/60 bg-transparent px-4 py-2 font-mono text-xs font-bold uppercase tracking-wider text-primary transition hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  /* Muted text button (sharp). */
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 border border-outline-variant/60 bg-surface-container-low px-3 py-2 font-mono text-xs font-semibold uppercase tracking-wider text-on-surface-variant transition hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  /* Status chip with filled coloring. */
+  .chip {
+    @apply inline-flex items-center gap-2 border px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider;
+  }
+}
+
+@keyframes wave {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
   }
 }

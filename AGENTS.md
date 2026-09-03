@@ -29,7 +29,8 @@ Project conventions for AI coding agents working in this repository.
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest        # run tests (incl. camera)
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000   # plain dev; detection OFF by default
+.\run_camera_demo.ps1                        # heuristic + live + demo experiment (detection ON)
 ```
 
 The camera layer lives in `backend/camera/` (`capture.py`: `OpenCVCamera`,
@@ -113,6 +114,11 @@ at runtime (same `Detection` shape the scripted feed always used). Rules:
     about repeated/out-of-sequence actions — that coverage is the mock's job.
   - `service.start()` calls `perception.reset()` when present; pass the
     session's `current_step_index` via `current_index` at wiring time.
+- `backend/experiments/heuristic_live_demo.json` is a drop-in demo whose
+  `expectedObjects` use only the heuristic detector's real classes
+  (`person`/`red_box`/`yellow_box`) so the **live** path can advance on actual
+  frames (`EXPERIMENT_FILE=...` + `ACTIVITY_BACKEND=live`). The canonical
+  `experiment/experiment.json` stays authoritative and is not modified.
 - `MockActivityPerception` is a **mock** — deterministic and derived from the
   loaded experiment's own steps (correct sequence + a fixed rotation of
   planted mistakes: later-step OOS, repeat, low-confidence, unknown). It never
