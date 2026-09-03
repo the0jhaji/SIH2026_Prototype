@@ -2,41 +2,105 @@
 
 /* Theme is handled by the `.dark` class on <html> (light is the default,
    dark the previous look). Set by the inline script in index.html + the
-   useTheme hook, persisted under `astra-theme` in localStorage. */
+   useTheme hook, persisted under `astra-theme` in localStorage.
+
+   Color tokens are theme-aware: tailwind color utilities (text-on-surface,
+   bg-surface-container, border-outline-variant, …) resolve to CSS variables
+   that flip between a light and a dark value depending on the active theme.
+   :root = light, .dark = space theme. */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Material-inspired space theme. All border radii are 0 (sharp). Fonts:
-   Inter for headlines/body, JetBrains Mono for data/labels. */
+/* Tailwind token names → indirection variables. */
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
-  --color-primary: #4cd7f6;
-  --color-primary-container: #06b6d4;
-  --color-on-primary: #002d35;
-  --color-on-primary-container: #00272e;
+  --color-primary: var(--t-primary);
+  --color-primary-container: var(--t-primary-container);
+  --color-on-primary: var(--t-on-primary);
+  --color-on-primary-container: var(--t-on-primary-container);
 
-  --color-secondary: #ffb95f;
-  --color-secondary-container: #ee9800;
-  --color-on-secondary: #342300;
-  --color-on-secondary-container: #2d1f00;
+  --color-secondary: var(--t-secondary);
+  --color-secondary-container: var(--t-secondary-container);
+  --color-on-secondary: var(--t-on-secondary);
+  --color-on-secondary-container: var(--t-on-secondary-container);
 
-  --color-tertiary: #ffb3ad;
-  --color-error: #ffb4ab;
-  --color-error-container: #93000a;
+  --color-tertiary: var(--t-tertiary);
+  --color-error: var(--t-error);
+  --color-error-container: var(--t-error-container);
 
-  --color-surface: #131314;
-  --color-on-surface: #e5e2e3;
-  --color-on-surface-variant: #bcc9cd;
-  --color-surface-container: #201f20;
-  --color-surface-container-high: #2a2a2b;
-  --color-surface-container-lowest: #0e0e0f;
-  --color-surface-container-low: #1c1b1c;
+  --color-surface: var(--t-surface);
+  --color-on-surface: var(--t-on-surface);
+  --color-on-surface-variant: var(--t-on-surface-variant);
+  --color-surface-container: var(--t-surface-container);
+  --color-surface-container-high: var(--t-surface-container-high);
+  --color-surface-container-lowest: var(--t-surface-container-lowest);
+  --color-surface-container-low: var(--t-surface-container-low);
 
-  --color-outline: #869397;
-  --color-outline-variant: #3d494c;
+  --color-outline: var(--t-outline);
+  --color-outline-variant: var(--t-outline-variant);
 
-  --color-bg: #0b0f14;
+  --color-bg: var(--t-bg);
+}
+
+/* Light (default) palette — brand cyan/orange on light surfaces. */
+:root {
+  --t-primary: #00697c;
+  --t-primary-container: #9df0ff;
+  --t-on-primary: #ffffff;
+  --t-on-primary-container: #001f27;
+
+  --t-secondary: #835a00;
+  --t-secondary-container: #ffdcab;
+  --t-on-secondary: #ffffff;
+  --t-on-secondary-container: #2a1a00;
+
+  --t-tertiary: #8c4a44;
+  --t-error: #ba1a1a;
+  --t-error-container: #ffdad6;
+
+  --t-surface: #fdfcff;
+  --t-on-surface: #1b1b1d;
+  --t-on-surface-variant: #47484a;
+  --t-surface-container: #efeef1;
+  --t-surface-container-high: #e9e8eb;
+  --t-surface-container-lowest: #ffffff;
+  --t-surface-container-low: #f5f4f7;
+
+  --t-outline: #74777b;
+  --t-outline-variant: #c4c6cb;
+
+  --t-bg: #eef2f5;
+}
+
+/* Dark (space) palette — the original Material space look. */
+.dark {
+  --t-primary: #4cd7f6;
+  --t-primary-container: #06b6d4;
+  --t-on-primary: #002d35;
+  --t-on-primary-container: #00272e;
+
+  --t-secondary: #ffb95f;
+  --t-secondary-container: #ee9800;
+  --t-on-secondary: #342300;
+  --t-on-secondary-container: #2d1f00;
+
+  --t-tertiary: #ffb3ad;
+  --t-error: #ffb4ab;
+  --t-error-container: #93000a;
+
+  --t-surface: #131314;
+  --t-on-surface: #e5e2e3;
+  --t-on-surface-variant: #bcc9cd;
+  --t-surface-container: #201f20;
+  --t-surface-container-high: #2a2a2b;
+  --t-surface-container-lowest: #0e0e0f;
+  --t-surface-container-low: #1c1b1c;
+
+  --t-outline: #869397;
+  --t-outline-variant: #3d494c;
+
+  --t-bg: #0b0f14;
 }
 
 @layer base {
@@ -57,7 +121,7 @@
 @layer components {
   /* Card surface used by every panel in the dashboard. Sharp corners. */
   .panel {
-    @apply border border-[#3d494c]/50 bg-surface-container text-on-surface dark:border-outline-variant/50;
+    @apply border border-outline-variant/50 bg-surface-container text-on-surface;
   }
   /* Inner info tile (Source / Resolution / Frames / detector rows). */
   .tile {
