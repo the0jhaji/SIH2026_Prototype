@@ -64,6 +64,7 @@ class YoloDetector(BaseDetector):
         self._net: Optional[cv2.dnn.Net] = None
         self._weights: Path | None = None
         self._error: str | None = None
+        self._blob: np.ndarray | None = None
 
     @property
     def is_loaded(self) -> bool:
@@ -88,14 +89,15 @@ class YoloDetector(BaseDetector):
             self.classes = names
         net = cv2.dnn.readNetFromONNX(str(resolved))
         if self.cv_threads and self.cv_threads > 0:
-            # OpenCV caps the parallel worker pool process-wide (no per-Net API).
             cv2.setNumThreads(self.cv_threads)
+        else:
+            cv2.setNumThreads(1)
         if self.use_cuda:
             try:
                 net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
                 net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
             except cv2.error:
-                pass  # non-CUDA OpenCV build → keep CPU (default path)
+                pass
         self._net = net
         self._weights = resolved
         self._error = None

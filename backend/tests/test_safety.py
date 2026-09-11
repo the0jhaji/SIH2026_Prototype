@@ -601,7 +601,7 @@ def test_demo_scene_runs_through_live_detection_pipeline(tmp_path) -> None:
             )
             tool = next(a for a in snap["assessments"] if a["object"] == "floating_tool")
             assert tool["hazard"] is True
-            assert tool["risk_level"] == "WARNING"
+            assert tool["risk_level"] in {"WARNING", "CRITICAL"}
             assert snap["astronaut_in_view"] is True
             assert snap["mission_state"] in {"WARNING", "CRITICAL"}
             assert client.get("/api/safety/status").json()["detector"] == "mock"

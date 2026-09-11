@@ -209,6 +209,7 @@ def create_app(
             escalate_enabled=config.EARTH_ESCALATION_ENABLED,
             escalate_min_level=config.EARTH_ESCALATION_MIN_LEVEL,
             model_version=model_version,
+            voice=voice_service,
         )
     safety_autostart = config.SAFETY_ENABLED if safety_autostart is None else safety_autostart
 

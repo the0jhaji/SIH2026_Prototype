@@ -48,7 +48,7 @@ DETECTION_ENABLED = _env_bool("DETECTION_ENABLED")
 DETECTION_BACKEND = os.environ.get("DETECTION_BACKEND", "mock").strip().lower()
 DETECTION_MODEL_PATH = os.environ.get("DETECTION_MODEL_PATH", "detection/yolov8n.onnx")
 DETECTION_CONF_THRESHOLD = float(os.environ.get("DETECTION_CONF_THRESHOLD", "0.5"))
-DETECTION_POLL_MS = int(os.environ.get("DETECTION_POLL_MS", "100"))
+DETECTION_POLL_MS = int(os.environ.get("DETECTION_POLL_MS", "10"))
 # Explicit OpenCV thread pool size for the detector. 0 (default) leaves OpenCV's
 # auto-detect untouched; a positive value caps oversubscription on small hosts.
 DETECTION_CV_THREADS = int(os.environ.get("DETECTION_CV_THREADS", "0"))
@@ -124,7 +124,7 @@ ENVIRONMENT_MODE = os.environ.get("ENVIRONMENT_MODE", "microgravity").strip().lo
 SAFETY_ENABLED = _env_bool("SAFETY_ENABLED") or os.environ.get("SAFETY_ENABLED", "").strip() == ""
 
 # Monitoring loop pacing (ms between assessment cycles).
-SAFETY_POLL_MS = int(os.environ.get("SAFETY_POLL_MS", "500"))
+SAFETY_POLL_MS = int(os.environ.get("SAFETY_POLL_MS", "100"))
 
 # Detection feed is considered stale (camera off / detector idle) after this gap.
 SAFETY_STALE_MS = int(os.environ.get("SAFETY_STALE_MS", "5000"))

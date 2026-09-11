@@ -48,6 +48,7 @@ class SafetyService:
         escalate_enabled: bool = False,
         escalate_min_level: str = "CRITICAL",
         model_version: str = "unknown",
+        voice=None,
     ) -> None:
         self.detection_service = detection_service
         self.camera_manager = camera_manager
@@ -63,6 +64,7 @@ class SafetyService:
         self.escalate_enabled = escalate_enabled
         self.escalate_min_level = escalate_min_level
         self.model_version = model_version
+        self._voice = voice
         self._task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
         self._monitoring = False
@@ -196,6 +198,12 @@ class SafetyService:
                 kind, severity, message = "ALERT_ACKNOWLEDGED", "info", f"Alert acknowledged: {alert.title}"
             elif self._is_new_alert(alert):
                 kind, severity, message = "ALERT_RAISED", "warn", f"{alert.level} — {alert.message}"
+                if self._voice is not None:
+                    self._voice.speak_hazard(
+                        alert.hazard_type or alert.object or "unknown",
+                        alert.level,
+                        alert.object or "unknown",
+                    )
             else:
                 kind, severity, message = "ALERT_ESCALATED", "warn", f"{alert.level} — {alert.message}"
             alert_events.append(
@@ -300,6 +308,8 @@ class SafetyService:
             key = f"emergency:{emergency.event_type}"
             present_keys.add(key)
             if self.incidents.open_by_key(key) is None:
+                if self._voice is not None:
+                    self._voice.speak_emergency(emergency.event_type, emergency.description)
                 incident = self.incidents.create(
                     severity="EMERGENCY",
                     event_type=emergency.event_type,

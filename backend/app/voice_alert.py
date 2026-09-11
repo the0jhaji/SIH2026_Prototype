@@ -1,31 +1,50 @@
 """Offline voice alert service using pyttsx3 (Windows SAPI5).
 
-Thread-safe: ``speak()`` dispatches to a background thread so the AI
-inference loop is never blocked.  Deduplication suppresses identical
-messages within a configurable cooldown window.
+Phase 5 optimizations:
+- Persistent TTS worker thread (init pyttsx3 once, reuse forever).
+- Thread-safe priority queue (CRITICAL > HIGH > WARNING > INFO).
+- Detection must never call pyttsx3 directly — always enqueue.
+- Cooldown/deduplication per key.
+- TTS failure never crashes detection.
+- Health/error state exposed.
+- Clean shutdown.
 """
 
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 import time
 from typing import Optional
 
 logger = logging.getLogger("astraai.voice")
 
-# pyttsx3 is optional — headless / CI environments get a silent fallback.
 try:
     import pyttsx3  # type: ignore[import-untyped]
-
     _TTS_AVAILABLE = True
 except ImportError:
     pyttsx3 = None  # type: ignore[assignment]
     _TTS_AVAILABLE = False
 
+_PRIORITY_MAP = {"CRITICAL": 0, "HIGH": 1, "WARNING": 2, "INFO": 3}
+
+
+class _AlertItem:
+    __slots__ = ("message", "key", "priority", "enqueued_at")
+
+    def __init__(self, message: str, key: str, priority: int) -> None:
+        self.message = message
+        self.key = key
+        self.priority = priority
+        self.enqueued_at = time.monotonic()
+
+    def __lt__(self, other: "_AlertItem") -> bool:
+        return self.priority < other.priority
+
 
 class VoiceAlertService:
-    """Speaks experiment lifecycle events aloud with deduplication."""
+    """Speaks alerts aloud via a persistent background TTS worker."""
 
     def __init__(
         self,
@@ -34,116 +53,163 @@ class VoiceAlertService:
         rate: int = 160,
         volume: float = 1.0,
         cooldown_s: float = 3.0,
+        max_queue: int = 20,
     ) -> None:
         self._enabled = enabled and _TTS_AVAILABLE
         self._rate = rate
         self._volume = volume
         self._cooldown_s = cooldown_s
+        self._queue: queue.Queue[_AlertItem] = queue.Queue(maxsize=max_queue)
+        self._dedup: dict[str, float] = {}
+        self._dedup_lock = threading.Lock()
+        self._worker: Optional[threading.Thread] = None
+        self._stop = threading.Event()
         self._engine = None
-        self._lock = threading.Lock()
-        self._last_spoken: dict[str, float] = {}
-        self._thread: Optional[threading.Thread] = None
+        self._health = "initializing"
+        self._error_count = 0
 
         if self._enabled:
+            self._start_worker()
+
+    def _start_worker(self) -> None:
+        def _worker() -> None:
             try:
                 self._engine = pyttsx3.init()
                 self._engine.setProperty("rate", self._rate)
                 self._engine.setProperty("volume", self._volume)
-                logger.info("Voice alert service initialised (pyttsx3)")
-            except Exception:  # noqa: BLE001
+                self._health = "ok"
+                logger.info("Voice worker started")
+            except Exception:
                 logger.warning("pyttsx3 init failed — voice disabled", exc_info=True)
+                self._health = "init_failed"
                 self._enabled = False
+                return
 
-    # ------------------------------------------------------------------ core
+            while not self._stop.is_set():
+                try:
+                    item = self._queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+                if item is None:
+                    break
+                # Check dedup
+                now = time.monotonic()
+                with self._dedup_lock:
+                    last = self._dedup.get(item.key, 0.0)
+                    if now - last < self._cooldown_s:
+                        continue
+                    self._dedup[item.key] = now
+                # Speak (may block briefly)
+                try:
+                    self._engine.say(item.message)
+                    self._engine.runAndWait()
+                    self._health = "ok"
+                    time.sleep(0.05)
+                except RuntimeError as exc:
+                    if "run loop" in str(exc).lower():
+                        try:
+                            self._engine = pyttsx3.init()
+                            self._engine.setProperty("rate", self._rate)
+                            self._engine.setProperty("volume", self._volume)
+                        except Exception:
+                            logger.warning("pyttsx3 reinit failed", exc_info=True)
+                            self._health = "reinit_failed"
+                            self._enabled = False
+                            return
+                    else:
+                        self._error_count += 1
+                        self._health = f"error_{self._error_count}"
+                        logger.warning("Voice speak failed: %s", item.message, exc_info=True)
+                except Exception:
+                    self._error_count += 1
+                    self._health = f"error_{self._error_count}"
+                    logger.warning("Voice speak failed: %s", item.message, exc_info=True)
 
-    def speak(self, message: str, *, key: Optional[str] = None) -> None:
-        """Speak *message* in a background thread.
+            try:
+                self._engine.stop()
+            except Exception:
+                pass
+            logger.info("Voice worker stopped")
 
-        If *key* is provided and the same key was spoken within the cooldown
-        window the call is silently ignored.
-        """
+        self._worker = threading.Thread(target=_worker, name="voice-tts", daemon=True)
+        self._worker.start()
+
+    def speak(self, message: str, *, key: Optional[str] = None, priority: str = "INFO") -> None:
+        """Enqueue a message for TTS. Non-blocking."""
         if not self._enabled or not message:
             return
         dedup_key = key or message
-        now = time.monotonic()
-        with self._lock:
-            last = self._last_spoken.get(dedup_key, 0.0)
-            if now - last < self._cooldown_s:
-                return
-            self._last_spoken[dedup_key] = now
-        self._dispatch(message)
+        prio = _PRIORITY_MAP.get(priority.upper(), 3)
+        item = _AlertItem(message, dedup_key, prio)
+        try:
+            self._queue.put_nowait(item)
+        except queue.Full:
+            logger.debug("Voice queue full, dropping: %s", message)
 
-    def _dispatch(self, message: str) -> None:
-        def _run() -> None:
-            try:
-                with self._lock:
-                    if self._engine is not None:
-                        self._engine.say(message)
-                        self._engine.runAndWait()
-            except Exception:  # noqa: BLE001
-                logger.warning("Voice speak failed: %s", message, exc_info=True)
+    # --- hazard/safety alerts ---
 
-        t = threading.Thread(target=_run, name="voice-tts", daemon=True)
-        t.start()
+    def speak_hazard(self, hazard_type: str, risk_level: str, object_name: str) -> None:
+        severity_to_priority = {"CRITICAL": "CRITICAL", "WARNING": "WARNING", "CAUTION": "INFO"}
+        prio = severity_to_priority.get(risk_level, "INFO")
+        msg_map = {
+            "CRITICAL": f"Critical hazard. {object_name} detected.",
+            "WARNING": f"Warning. {hazard_type} detected. {object_name}.",
+            "CAUTION": f"Caution. {hazard_type} detected.",
+        }
+        self.speak(msg_map.get(risk_level, f"Alert. {hazard_type}."), key=f"hazard:{object_name}:{hazard_type}", priority=prio)
 
-    # -------------------------------------------------------- high-level API
+    def speak_emergency(self, event_type: str, description: str) -> None:
+        self.speak(
+            f"Emergency. {description}.",
+            key=f"emergency:{event_type}",
+            priority="CRITICAL",
+        )
+
+    # --- experiment lifecycle (backward compat) ---
 
     def announce_experiment_started(self, experiment_name: str) -> None:
-        self.speak(
-            f"Experiment started. {experiment_name}.",
-            key="experiment_started",
-        )
+        self.speak(f"Experiment started. {experiment_name}.", key="experiment_started")
 
     def announce_next_step(self, step_label: str, step_number: int, total: int) -> None:
-        self.speak(
-            f"Next step {step_number} of {total}. {step_label}.",
-            key=f"next_step_{step_number}",
-        )
+        self.speak(f"Next step {step_number} of {total}. {step_label}.", key=f"next_step_{step_number}")
 
     def announce_step_completed(self, step_label: str) -> None:
-        self.speak(
-            f"Step completed. {step_label}.",
-            key=f"completed_{step_label}",
-        )
+        self.speak(f"Step completed. {step_label}.", key=f"completed_{step_label}")
 
     def announce_skipped_step(self, expected_label: str) -> None:
-        self.speak(
-            f"Warning. The expected step was skipped. {expected_label}.",
-            key="skipped",
-        )
+        self.speak(f"Warning. The expected step was skipped. {expected_label}.", key="skipped", priority="WARNING")
 
     def announce_out_of_sequence(self, expected_label: str) -> None:
-        self.speak(
-            f"Warning. Activity is out of sequence. Expected: {expected_label}.",
-            key="out_of_sequence",
-        )
+        self.speak(f"Warning. Activity is out of sequence. Expected: {expected_label}.", key="out_of_sequence", priority="WARNING")
 
     def announce_repeated_step(self, step_label: str) -> None:
-        self.speak(
-            f"Step repeated. {step_label}.",
-            key="repeated",
-        )
+        self.speak(f"Step repeated. {step_label}.", key="repeated")
 
     def announce_uncertain(self) -> None:
-        self.speak(
-            "Unable to confidently identify the current activity.",
-            key="uncertain",
-        )
+        self.speak("Unable to confidently identify the current activity.", key="uncertain")
 
     def announce_experiment_completed(self) -> None:
-        self.speak(
-            "Experiment completed successfully.",
-            key="experiment_completed",
-        )
+        self.speak("Experiment completed successfully.", key="experiment_completed")
 
     def announce_experiment_paused(self) -> None:
-        self.speak(
-            "Experiment paused. Camera or detection unavailable.",
-            key="experiment_paused",
-        )
+        self.speak("Experiment paused. Camera or detection unavailable.", key="experiment_paused")
 
-    # ------------------------------------------------------------------ ctrl
+    # --- health/shutdown ---
+
+    @property
+    def health(self) -> str:
+        return self._health
+
+    @property
+    def queue_size(self) -> int:
+        return self._queue.qsize()
 
     def close(self) -> None:
+        self._stop.set()
+        try:
+            self._queue.put_nowait(None)
+        except queue.Full:
+            pass
+        if self._worker is not None:
+            self._worker.join(timeout=2.0)
         self._enabled = False
-        self._engine = None

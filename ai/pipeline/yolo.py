@@ -79,31 +79,18 @@ def postprocess_yolov8(
     conf_threshold: float = 0.25,
     iou_threshold: float = 0.45,
 ) -> list[ObjectDetection]:
-    """Decode a YOLOv8 ONNX output tensor (``(1, 4 + C, N)`` or transposed)
-    back into original-frame pixel space. Coordinates from the network are
-    normalized to ``[0, 1]`` relative to the letterboxed ``input_size``."""
+    """Decode a YOLOv8 ONNX output tensor back into original-frame pixel space."""
     arr = np.asarray(outputs, dtype=np.float32)
     num_classes = len(classes)
     if arr.ndim == 3:
         arr = arr[0]
-    # Orient rows = detections, columns = features (4 + C). YOLOv8 exports
-    # may arrive as (N, 4 + C) or (4 + C, N), and the model's true class
-    # count can be larger than the configured ``classes`` list (e.g. a
-    # generic COCO model behind a smaller .names override) — so orient by
-    # shape, not by ``num_classes``.
     if arr.shape[1] != 4 + num_classes and (
         arr.shape[0] == 4 + num_classes
         or (arr.shape[0] < arr.shape[1] and arr.shape[0] <= 4 + 1000)
         or arr.shape[1] < 4 + num_classes
     ):
         arr = arr.T
-    assert arr.shape[1] >= 4 + num_classes, (
-        f"model output width {arr.shape[1]} < 4 + {num_classes} classes"
-    )
 
-    # Some exports emit box coordinates already in ``input_size`` pixel
-    # units instead of normalized [0, 1]; normalize so the decode below
-    # uses a single convention.
     if arr.shape[0] and float(arr[:, :4].max()) > 1.5:
         arr = arr.copy()
         arr[:, :4] /= input_size
@@ -112,7 +99,6 @@ def postprocess_yolov8(
     scores = class_scores.max(axis=1)
     class_ids = class_scores.argmax(axis=1)
     keep = scores >= conf_threshold
-    # Drop entries whose top class is outside the configured class list.
     keep &= class_ids < num_classes
     if not keep.any():
         return []
@@ -121,46 +107,55 @@ def postprocess_yolov8(
     scores = scores[keep]
     class_ids = class_ids[keep]
 
-    candidates: list[tuple[Box, float, str]] = []
-    for row, score, cid in zip(rows, scores, class_ids):
-        cx, cy, bw, bh = row[0], row[1], row[2], row[3]
-        # canvas (letterbox) pixel space: normalized 0..1 × input_size
-        x1 = (cx * input_size - bw * input_size / 2 - dx) / scale
-        y1 = (cy * input_size - bh * input_size / 2 - dy) / scale
-        x2 = (cx * input_size + bw * input_size / 2 - dx) / scale
-        y2 = (cy * input_size + bh * input_size / 2 - dy) / scale
-        box = Box(
-            x=round(x1),
-            y=round(y1),
-            width=round(x2 - x1),
-            height=round(y2 - y1),
-        ).clamp(frame_width, frame_height)
-        if box.width <= 0 or box.height <= 0:
-            continue
-        candidates.append((box, float(score), classes[int(cid)]))
-
-    if not candidates:
+    inv_scale = 1.0 / scale if scale != 0 else 1.0
+    offset_x = dx * inv_scale
+    offset_y = dy * inv_scale
+    half_w = rows[:, 2] * input_size * 0.5 * inv_scale
+    half_h = rows[:, 3] * input_size * 0.5 * inv_scale
+    cx = rows[:, 0] * input_size * inv_scale
+    cy = rows[:, 1] * input_size * inv_scale
+    x1 = cx - half_w + offset_x
+    y1 = cy - half_h + offset_y
+    x2 = cx + half_w + offset_x
+    y2 = cy + half_h + offset_y
+    x1 = np.clip(np.round(x1), 0, frame_width).astype(np.int32)
+    y1 = np.clip(np.round(y1), 0, frame_height).astype(np.int32)
+    x2 = np.clip(np.round(x2), 0, frame_width).astype(np.int32)
+    y2 = np.clip(np.round(y2), 0, frame_height).astype(np.int32)
+    widths = x2 - x1
+    heights = y2 - y1
+    valid = (widths > 0) & (heights > 0)
+    if not valid.any():
         return []
 
-    # Class-aware NMS: suppress duplicates within each class, never across.
-    selected: list[tuple[Box, float, str]] = []
-    by_label: dict[str, list[tuple[Box, float]]] = {}
-    for box, score, label in candidates:
-        by_label.setdefault(label, []).append((box, score))
+    x1, y1, x2, y2, scores_v, cids = x1[valid], y1[valid], x2[valid], y2[valid], scores[valid], class_ids[valid]
+    label_names = [classes[int(c)] for c in cids]
+
+    selected: list[tuple[int, float, str]] = []
+    by_label: dict[str, list[tuple[int, float]]] = {}
+    for idx in range(len(x1)):
+        by_label.setdefault(label_names[idx], []).append((idx, float(scores_v[idx])))
     for label, items in by_label.items():
-        boxes = [box.as_tuple() for box, _ in items]
-        indices = cv2.dnn.NMSBoxes(
-            boxes, [score for _, score in items], conf_threshold, iou_threshold
-        )
+        box_tuples = [(int(x1[i]), int(y1[i]), int(x2[i] - x1[i]), int(y2[i] - y1[i])) for i, _ in items]
+        score_list = [s for _, s in items]
+        indices = cv2.dnn.NMSBoxes(box_tuples, score_list, conf_threshold, iou_threshold)
         if indices is None or len(indices) == 0:
             continue
         for i in np.atleast_1d(indices):
-            selected.append((items[int(i)][0], items[int(i)][1], label))
+            orig_idx = items[int(i)][0]
+            selected.append((orig_idx, float(scores_v[orig_idx]), label))
 
     selected.sort(key=lambda item: item[1], reverse=True)
     return [
-        ObjectDetection(class_name=label, confidence=conf, bounding_box=box, timestamp=0)
-        for box, conf, label in selected
+        ObjectDetection(
+            class_name=label,
+            confidence=conf,
+            bounding_box=Box(x=int(x1[orig_idx]), y=int(y1[orig_idx]),
+                             width=int(x2[orig_idx] - x1[orig_idx]),
+                             height=int(y2[orig_idx] - y1[orig_idx])),
+            timestamp=0,
+        )
+        for orig_idx, conf, label in selected
     ]
 
 

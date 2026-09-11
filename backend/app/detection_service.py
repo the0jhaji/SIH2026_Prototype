@@ -178,7 +178,11 @@ class DetectionService:
                 logger.exception("Detection inference failed")
                 with self._lock:
                     self._last_error = f"Detection failed: {exc}"
-            self._stop.wait(self._poll_ms / 1000.0)
+            # No poll delay: process the next frame immediately.
+            # The camera's latest_capture() returns only the newest frame,
+            # so idle loops (no new frame) are near-zero cost via the ID check.
+            if last_id == -1:
+                self._stop.wait(0.01)
 
     def _infer_once(self, last_id: int) -> int:
         cap = self._camera.latest_capture()

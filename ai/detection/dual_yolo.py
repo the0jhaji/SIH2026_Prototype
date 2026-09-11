@@ -1,13 +1,15 @@
 """Dual YOLO detector: runs a general COCO model + a custom experiment model
 on the same frame and merges results with cross-model NMS.
 
-This avoids false positives from heuristic color detection while giving the
-system both general object awareness (person, bottle, etc.) and precise
-experiment object detection (red_box, yellow_box) from trained models.
+Runs models sequentially — parallel ONNX inference on CPU causes thread
+contention and is measurably slower. Other optimizations: cv_threads=1
+per model (prevents OpenCV over-threading), vectorized postprocessing,
+no poll delay in detection loop.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 import numpy as np
@@ -15,6 +17,8 @@ import numpy as np
 from .detector import BaseDetector
 from .types import Detection, DetectorStatus
 from .yolo_detector import YoloDetector
+
+logger = logging.getLogger("astraai.detection")
 
 
 def _iou(a: Detection, b: Detection) -> float:
@@ -28,7 +32,7 @@ def _iou(a: Detection, b: Detection) -> float:
 
 
 class DualYoloDetector(BaseDetector):
-    """Runs general + custom YOLO models and merges with cross-model NMS."""
+    """Runs general + custom YOLO models sequentially, merges with cross-model NMS."""
 
     name = "yolo"
     model_free = False
@@ -71,8 +75,16 @@ class DualYoloDetector(BaseDetector):
         if not self._loaded:
             self.load()
         ts = self._ts(timestamp_ms)
-        general_dets = self._general.detect(frame, ts)
-        custom_dets = self._custom.detect(frame, ts)
+        try:
+            general_dets = self._general.detect(frame, ts)
+        except Exception as exc:
+            logger.warning("General model error: %s", exc)
+            general_dets = []
+        try:
+            custom_dets = self._custom.detect(frame, ts)
+        except Exception as exc:
+            logger.warning("Custom model error: %s", exc)
+            custom_dets = []
         merged = general_dets + custom_dets
         return self._nms(merged)
 
