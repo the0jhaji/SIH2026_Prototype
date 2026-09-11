@@ -1,21 +1,22 @@
 # Astra AI — SIH 2026 PS 26174
 
-Offline AI-based **Human Activity Recognition** for on-board experiment
-assistance on Bharatiya Antariksh Station (BAS). A fixed camera watches the
-operator, the system recognises predefined experiment activities against a
-**configurable** sequence, validates their order, detects errors, and drives a
-live monitoring dashboard — fully offline.
+Local-first **Astronaut Safety & Hazard Monitoring** for on-board experiments on
+Bharatiya Antariksh Station (BAS), plus the original human-activity-recognition
+experiment assistant as a decoupled legacy demo. A fixed camera watches the
+operator; the system detects objects, classifies hazards from a **config-driven
+knowledge base**, scores risk under the configured environment, drives a safety
+monitor (NORMAL → … → EMERGENCY), raises de-duplicated alerts, records
+incidents with evidence, and stages local-only Earth-escalation packages —
+fully offline, no cloud, no LLM in the loop.
 
 This repository contains the **software prototype foundation**: a React
 dashboard, a FastAPI backend, WebSocket streaming, a configurable experiment
 simulator, a local webcam capture layer (Phase 2) that streams MJPEG to the
-dashboard, and an OpenCV perception pipeline with both mock and YOLO
-detectors, plus a hand/object interaction module (Phase 4) that turns
-detections + hand landmarks into temporal `HAND_NEAR`/`MOVED`/`PLACED`
-observations. Real trained detection enters by dropping an ONNX model into
-`models/yolo/`, and real hand tracking by dropping `hand_landmarker.task` into
-`models/pose/` (MediaPipe Tasks). **No cloud services, no cloud TTS, no LLM
-validation.**
+dashboard, an OpenCV perception pipeline with mock, heuristic and YOLO
+detectors, plus a hand/object interaction module (Phase 4). Real trained
+detection enters by dropping an ONNX model into `models/yolo/` (and real hand
+tracking by dropping `hand_landmarker.task` into `models/pose/` — MediaPipe
+Tasks). **No cloud services, no cloud TTS, no LLM validation.**
 
 ## Monorepo layout
 
@@ -78,6 +79,40 @@ pip install -r requirements-dev.txt
 cd frontend
 npm install
 ```
+
+## Quick Start
+
+Once the [Setup](#setup) steps are done (backend venv + frontend `node_modules`),
+start the **entire prototype with one command** from the project root:
+
+```powershell
+.\start.ps1
+```
+
+The script:
+
+- verifies `backend/.venv` and `frontend/node_modules` exist,
+- fails fast with a clear message if ports `8000` or `5173` are already in use,
+- starts the **FastAPI backend** on `http://localhost:8000` with object
+  detection **enabled in mock mode** (`DETECTION_ENABLED=true`,
+  `DETECTION_BACKEND=mock` — deterministic `person / red_box / yellow_box`,
+  no webcam or model weights required),
+- starts the **React/Vite frontend** on `http://localhost:5173`,
+- waits for both to be ready, then prints status, and
+- on `Ctrl+C` (or closing the window) stops both child processes.
+
+| Service | URL |
+| --- | --- |
+| Dashboard (frontend) | http://localhost:5173 |
+| API / OpenAPI docs | http://localhost:8000/docs |
+| Health check | http://localhost:8000/api/health |
+| Detection status | http://localhost:8000/api/detection/status |
+
+Runtime logs land in `.startup_logs/` (`backend.log`, `frontend.log`).
+
+> Detection uses the **mock** backend for now because the real Roboflow-trained
+> model is not integrated yet — see `models/detection/README.md` and the
+> dataset README for the future `yolo` backend.
 
 ## How to run — backend
 
@@ -277,7 +312,96 @@ automatically. See `ai/README.md` for the detector interface, the interaction
 module, and the `{class_name, confidence, bounding_box, timestamp}` JSON
 contract.
 
+## How astronaut safety monitoring works (Phase 6)
+
+The **new core** of the app. The safety monitor runs beside the legacy
+experiment pipeline and owns the active risk assessment:
+
+```
+Camera → DetectionService (mock / heuristic / yolo) ──► HazardEngine
+   ● temporal confirmation (a 1-frame blip never alarms)        │
+   ● hazard class ↔ knowledge base (backend/app/safety/hazards.json)
+   ● microgravity-aware risk score (ENVIRONMENT_MODE, configured)
+                                                               ▼
+                                                     SceneAssessment
+                                                               │
+                   ┌───────────────┬───────────────────────────┤
+                   ▼               ▼                           ▼
+             SafetyMonitor    EmergencyManager           AlertManager
+   NORMAL→OBSERVING→CAUTION   rules backend (absence,   de-duplicated by
+   →WARNING→CRITICAL→EMERG      stillness, collision)    root cause, escalate
+                   │               │                     in place, cooldown
+                   └───────────────┴───────────────────────────┤
+                                                               ▼
+        IncidentLog ── evidence frame + metadata ──► Earth-escalation package
+                                                       (locally staged only)
+```
+
+Flow per cycle (`SafetyService.step()`): pull `detection_service.latest()`
+→ `HazardEngine.assess()` → `EmergencyManager.update()` → `SafetyMonitor.update()`
+→ alert reconcile → incidents/evidence/escalation → WS snapshot broadcast.
+
+**Honest constraints** (nothing is ever faked):
+
+- Missing/failed YOLO weights → status shows `AI ENGINE ERROR` with the
+  reason; the monitor never crashes. Detection disabled or camera stopped
+  → scene goes *stale* (last known state retained); **a dead feed never
+  auto-resolves or auto-escalates**.
+- The system reports "possible hazard / risk assessment / emergency
+  candidate" — never a medical diagnosis. Robot/crew wording is used
+  deliberately (e.g. `POSSIBLE_INJURY`).
+- Earth escalation is **staged locally** as `escalation.json`
+  (`EARTH_ESCALATION_PACKAGE_READY`); nothing is transmitted. `EARTH_ESCALATION_
+  ENABLED=true` + `EARTH_ESCALATION_MIN_LEVEL=CRITICAL` control staging.
+- Confirmed **CRITICAL** hazards, confirmed **WARNING** hazards* near the
+  astronaut, and confirmed emergencies open an incident with evidence:
+  `data/incidents/<id>/{event.json, frame_<ts>.jpg, metadata.json, escalation.json}`.
+  *a WARNING far from the astronaut alerts but does not open an incident.
+
+Config (`backend/app/config.py`, env-overridable):
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SAFETY_ENABLED` | `true` | autostart the monitor on boot |
+| `ENVIRONMENT_MODE` | `microgravity` | operational environment for risk scoring |
+| `MOCK_SCENE` | *(empty = `bas`)* | mock-detector scene: `bas` / `empty` / `space_station` / `safety_sequence` |
+| `EARTH_ESCALATION_ENABLED` | `true` | stage escalation packages for qualifying incidents |
+| `EARTH_ESCALATION_MIN_LEVEL` | `CRITICAL` | minimum incident severity to stage |
+| `EMERGENCY_BACKEND` | `rules` | absence/stillness/collision rules backend |
+| `ALERT_COOLDOWN_MS` | `15000` | re-raise cooldown for a resolved root cause |
+| `SAFETY_POLL_MS` / `SAFETY_PERSIST_FRAMES` / `SAFETY_RESOLVE_FRAMES` / `SAFETY_STALE_MS` | `500` / `2` / `2` / `5000` | monitor loop & temporal gates |
+
+Safety REST endpoints (see `backend/app/main.py` for the full list):
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/safety/status` | monitor + pipeline health (`mission_state`, `tick`, counts) |
+| `GET /api/safety/snapshot` | mission state + per-object assessments + emergency |
+| `POST /api/safety/start` \| `stop` | control the monitor loop |
+| `GET /api/safety/alerts` | active + history alerts |
+| `POST /api/safety/alerts/{id}/ack` | acknowledge an alert |
+| `GET /api/safety/incidents` (+ `/api/safety/incidents/{id}`) | incident history + detail |
+| `GET /api/safety/station` | Mission-Control / space-station console feed |
+| `GET /api/safety/events` | safety event log |
+
+The dashboard exposes everything through the new nav (Mission, Camera,
+Hazards, Crew, Alerts, Station, Earth, Logs) plus a "Demo" tab for the legacy
+box experiment. WebSocket `/ws` now also pushes `{"type":"safety"}` snapshots
+and `{"type":"safety_event"}` events.
+
+One command, no webcam or model weights — mock camera + mock detector playing
+the `space_station` scene that yields a genuine `floating_tool` hazard ladder:
+
+```powershell
+.\backend\run_mock_demo.ps1
+```
+
+Full architecture, tests and migration notes: `docs/SAFETY_SYSTEM.md`.
+
 ## How the activity feed works
+
+> The activity feed below is the **legacy experiment demo** (retained
+> decoupled). The safety monitor above is the active core.
 
 1. Press **Start experiment** (Source: `Backend · FastAPI`).
 2. `POST /api/experiment/start` launches the configured perception source:
@@ -333,4 +457,4 @@ coverage: `docs/STATE_MACHINE.md`.
 - Perception is separate from decision-making.
 - No LLM as the sequence validator.
 - Offline-first everywhere.
-- Minimal dependencies; clean modular code.
+- Minimal dependencies; clean modular code

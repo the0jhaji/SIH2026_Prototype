@@ -20,23 +20,29 @@ The default model path (override anytime with `DETECTION_MODEL_PATH`) is:
 
 ## Class names
 
-Default classes (index-aligned with the Astra AI 5-class model), bit-identical
-to the pipeline's `DEFAULT_CLASSES`:
-
-```
-person, experiment_box, red_box, yellow_box, target_area
-```
+Class names are picked up (index-aligned, one per line) from the `.names`
+file **next to the ONNX file** — there is no hardcoded class list in code.
+The current `yolov8n.names` is extracted **from the model's own metadata**
+(the embedded COCO-80 list: `person`, `bicycle`, ..., `toothbrush`), so the
+detector reports exactly the classes the loaded model can actually detect,
+and only those.
 
 If a `.names` file (one class per line) sits **next to the ONNX file** — e.g.
-`yolov8n.names` — it overrides the list. Use that for a custom-trained model.
+`yolov8n.names` — it overrides the list. Use that for a custom-trained model
+(`dataset/scripts/install_detection_model.py` writes it from
+`classes.json`). Keep it index-aligned with the ONNX output, or the ID→name
+mapping and the <configured> class filter will silently drop or mislabel
+detections.
 
 ## ⚠️ Important limitation
 
-A **generic pretrained YOLO model (COCO, etc.) does not recognise these
-experiment-specific classes** — COCO has `person` but not `red_box`,
-`yellow_box`, `experiment_box`, or `target_area`, and its boxes don't match
-anything the state machine consumes. For a real pipeline you must train your
-own model.
+A **generic pretrained YOLO model (COCO, etc.) does not recognise the Astra
+experiment classes** — COCO has `person` but not `red_box`, `yellow_box`,
+`experiment_box`, or `target_area`, so those specific classes simply never
+appear. The COCO model does however detect its own 80 everyday classes
+(`person`, `bottle`, `cup`, `chair`, `cell phone`, ...), all of which flow to
+the hazard/safety layer honest and unclassified unless `hazards.json` maps
+them.
 
 Until then, two honest no-weights paths exist:
 
@@ -90,6 +96,26 @@ $env:DETECTION_ENABLED="true"; $env:DETECTION_BACKEND="yolo"
 a `.names` file (one class per line, index-aligned) sitting next to the ONNX
 overrides the default class list. The `.names` file is the training
 vocabulary, so you never hand-edit a class list in code.
+
+## Everyday-objects model (Roboflow set)
+
+Separate from the app's experiment-scene dataset, the repo carries a
+downloaded **15-class everyday-objects** set (`dataset/roboflow/`) that also
+trains the same runtime detector — useful for recognising common objects (Bag,
+Bottle, Cup, Watch, ...) alongside person/boxes. See `dataset/README.md`
+("Roboflow everyday-objects set") for the full prepare → train → evaluate →
+install loop. Its model installs to `roboflow.onnx` + `roboflow.names` (leaving
+the app's `yolov8n.onnx`/`.names` untouched) and is selected with
+`DETECTION_MODEL_PATH=detection/roboflow.onnx`.
+
+## Fastest way to see detection running (no weights)
+
+```powershell
+# from backend/: deterministic mock camera + mock detector
+.\run_mock_demo.ps1     # DETECTION_ENABLED=true, DETECTION_BACKEND=mock
+# from backend/: live heuristic detector on a real webcam
+.\run_camera_demo.ps1   # DETECTION_ENABLED=true, DETECTION_BACKEND=heuristic
+```
 
 ## Behaviour when missing
 

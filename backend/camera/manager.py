@@ -23,7 +23,14 @@ from typing import Optional
 import cv2
 import numpy as np
 
-from .capture import CameraError, CameraSettings, FrameReader, MockCamera, OpenCVCamera
+from .capture import (
+    CameraError,
+    CameraSettings,
+    FrameReader,
+    MockCamera,
+    OpenCVCamera,
+    validate_frame,
+)
 
 logger = logging.getLogger("astraai.camera")
 
@@ -73,16 +80,21 @@ class CameraManager:
     def _snapshot_locked(self) -> dict:
         """Status payload (camelCase keys, mirror-in-style). Lock must be held."""
         s = self.settings
+        reader = self._reader
+        reader_name = reader.name if reader is not None else "none"
         return {
             "status": self._status.value,
             "running": self._running_locked(),
-            "source": self._reader.name if self._reader is not None else "none",
+            "source": reader_name,
+            "backend": getattr(reader, "backend", None) if reader is not None else None,
             "cameraIndex": s.camera_index,
             "width": s.width,
             "height": s.height,
             "fps": s.fps,
             "mock": s.mock,
             "frameCount": self._frame_id,
+            "readStats": getattr(reader, "_stats", None) if reader is not None else None,
+            "diagnostics": getattr(reader, "diagnostics", None) if reader is not None else None,
             "error": self._last_error,
         }
 
@@ -107,6 +119,10 @@ class CameraManager:
 
     # ----------------------------------------------------------------- control
 
+    def _make_reader(self) -> FrameReader:
+        """Reader factory (tests inject a failure-prone reader here)."""
+        return MockCamera(self.settings) if self.settings.mock else OpenCVCamera(self.settings)
+
     def start(self) -> dict:
         """Open the camera and begin capturing. Idempotent when already
         running; returns the resulting status payload."""
@@ -115,7 +131,7 @@ class CameraManager:
                 return self._snapshot_locked()
             self._release_locked()
             settings = self.settings
-            reader = MockCamera(settings) if settings.mock else OpenCVCamera(settings)
+            reader = self._make_reader()
             try:
                 if not reader.open():
                     raise CameraError(
@@ -194,10 +210,14 @@ class CameraManager:
                 logger.exception("Camera read error")
                 self._set_error(f"Camera read error: {exc}")
                 return
-            if frame is None:
+            valid, reason = validate_frame(frame, reject_black=self.settings.reject_black)
+            if not valid:
                 failures += 1
                 if failures >= self._max_failures:
-                    self._set_error("Camera feed interrupted (device lost frames).")
+                    self._set_error(
+                        f"Camera feed interrupted: {reason} "
+                        f"({failures} consecutive invalid frames)."
+                    )
                     return
                 time.sleep(0.05)
                 continue

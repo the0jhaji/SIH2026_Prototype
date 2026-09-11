@@ -1,10 +1,13 @@
 export type ViewKey =
+  | 'mission'
+  | 'camera'
+  | 'assessment'
+  | 'astronaut'
+  | 'alerts'
+  | 'station'
+  | 'escalation'
+  | 'incidents'
   | 'experiments'
-  | 'live'
-  | 'sequence'
-  | 'logs'
-  | 'analytics'
-  | 'system'
 
 export interface NavItem {
   key: ViewKey
@@ -13,19 +16,25 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { key: 'experiments', icon: 'science', label: 'Exp' },
-  { key: 'live', icon: 'videocam', label: 'Live' },
-  { key: 'sequence', icon: 'list_alt', label: 'Seq' },
-  { key: 'logs', icon: 'terminal', label: 'Logs' },
-  { key: 'analytics', icon: 'query_stats', label: 'Stats' },
-  { key: 'system', icon: 'memory', label: 'System' },
+  { key: 'mission', icon: 'radar', label: 'Mission' },
+  { key: 'camera', icon: 'videocam', label: 'Camera' },
+  { key: 'assessment', icon: 'warning', label: 'Hazards' },
+  { key: 'astronaut', icon: 'accessibility_new', label: 'Crew' },
+  { key: 'alerts', icon: 'notifications', label: 'Alerts' },
+  { key: 'station', icon: 'router', label: 'Station' },
+  { key: 'escalation', icon: 'public', label: 'Earth' },
+  { key: 'incidents', icon: 'history_edu', label: 'Logs' },
+  { key: 'experiments', icon: 'science', label: 'Demo' },
 ]
 
 export const VIEW_TITLES: Record<ViewKey, string> = {
-  experiments: 'Experiment Configuration',
-  live: 'Live Monitor',
-  sequence: 'Sequence Validation',
-  logs: 'Experiment Logs',
-  analytics: 'Analytics & Telemetry',
-  system: 'System Core Monitoring',
+  mission: 'Mission Status',
+  camera: 'Live Camera & Detection',
+  assessment: 'Hazard Assessment',
+  astronaut: 'Astronaut Status',
+  alerts: 'Active Alerts',
+  station: 'Mission Control / Space Station',
+  escalation: 'Earth Escalation',
+  incidents: 'Incident History',
+  experiments: 'Legacy Experiment Demo',
 }

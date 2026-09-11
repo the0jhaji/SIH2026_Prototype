@@ -31,6 +31,7 @@ export function LiveMonitorView({
   const expected = expectedStep(state.experiment, state.currentStepIndex)
   const streamUrl = cameraRunning ? CAMERA_STREAM_URL : null
   const detections = cameraRunning ? detection?.detections ?? [] : []
+  const unknownDetections = cameraRunning ? detection?.unknownDetections ?? [] : []
   const detected = state.currentDetected
   const confidence = detected ? Math.round(detected.confidence * 100) : 0
 
@@ -49,6 +50,7 @@ export function LiveMonitorView({
               state={state}
               streamUrl={streamUrl}
               detections={detections}
+              unknownDetections={unknownDetections}
               frameWidth={cameraRunning ? detection?.frameWidth ?? null : null}
               frameHeight={cameraRunning ? detection?.frameHeight ?? null : null}
             />
@@ -104,13 +106,13 @@ export function LiveMonitorView({
       <div className="space-y-4">
         <section className="panel p-4">
           <h2 className="heading-title">Detections</h2>
-          {detections.length === 0 ? (
+          {detections.length === 0 && unknownDetections.length === 0 ? (
             <p className="mt-3 font-mono text-[11px] text-on-surface-variant">
               No objects detected{cameraRunning ? ' — waiting for recognition' : ' — camera offline'}.
             </p>
           ) : (
             <ul className="mt-3 space-y-1.5">
-              {detections.map((d, i) => (
+              {[...detections, ...unknownDetections].map((d, i) => (
                 <li
                   key={i}
                   className="flex items-center justify-between border border-outline-variant/30 bg-surface-container-low px-2.5 py-1.5"
@@ -118,9 +120,13 @@ export function LiveMonitorView({
                   <span className="flex items-center gap-2 font-mono text-[11px] font-bold uppercase tracking-wider">
                     <span
                       className="h-2 w-2"
-                      style={{ background: CLASS_COLOR[d.class_name] ?? '#4cd7f6' }}
+                      style={{
+                        background: d.class_name === 'unknown_object' ? '#ffffff' : CLASS_COLOR[d.class_name] ?? '#4cd7f6',
+                      }}
                     />
-                    {d.class_name.replace(/_/g, ' ')}
+                    {d.class_name === 'unknown_object'
+                      ? `unknown (${d.instance_id ?? '?'})`
+                      : d.class_name.replace(/_/g, ' ')}
                   </span>
                   <span className="font-mono text-[11px] text-secondary">
                     {Math.round(d.confidence * 100)}%
@@ -157,6 +163,7 @@ export function LiveMonitorView({
             <Tile label="Objects" value={String(detection?.detections?.length ?? 0)} />
             <Tile label="Inference" value={detection?.inferenceStatus ?? '—'} />
             <Tile label="Latency" value={detection?.inferenceMs != null ? `${detection.inferenceMs}ms` : '—'} />
+            <Tile label="Unknown" value={String(detection?.unknownDetections?.length ?? 0)} />
           </div>
         </section>
       </div>

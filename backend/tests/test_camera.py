@@ -9,7 +9,7 @@ import numpy as np
 from fastapi.testclient import TestClient
 
 from camera import CameraManager, CameraSettings
-from camera.capture import MockCamera
+from camera.capture import MockCamera, select_backend, validate_frame
 from app.experiment import load_experiment
 from app.main import create_app
 
@@ -160,3 +160,143 @@ def test_lifespan_shutdown_cleans_up() -> None:
     manager.close()
     assert manager.status.value == "disconnected"
     assert manager.latest_frame() is None
+
+
+# ---------------------------------------------------------------------------
+# Frame validation + backend fallback (no physical device touched).
+# ---------------------------------------------------------------------------
+
+
+def test_validate_frame_rejects_black_but_accepts_real_pixels() -> None:
+    black = np.zeros((240, 320, 3), dtype=np.uint8)
+    ok, reason = validate_frame(black, reject_black=True)
+    assert ok is False
+    assert "blank/black" in reason
+
+    noisy = black.copy()
+    noisy[::8, ::8] = 128  # sparse but real (mean/σ above the black floor)
+    ok, reason = validate_frame(noisy, reject_black=True)
+    assert ok is True
+
+    ok, reason = validate_frame(None, reject_black=True)
+    assert ok is False and reason == "no frame returned"
+
+    # reject_black=False makes even a zero frame structurally valid.
+    ok, reason = validate_frame(black, reject_black=False)
+    assert ok is True
+
+
+class _BlackReader:
+    """FrameReader that always delivers pure-black frames."""
+
+    name = "webcam"
+
+    def __init__(self, settings: CameraSettings) -> None:
+        self.settings = settings
+        self.backend = "dshow"
+        self.diagnostics = {"probes": ["dshow: black-frame test stub"]}
+
+    def open(self) -> bool:
+        return True
+
+    def read(self):
+        return np.zeros((self.settings.height, self.settings.width, 3), dtype=np.uint8)
+
+    def release(self) -> None:
+        pass
+
+
+def test_black_feed_never_connects(monkeypatch) -> None:
+    with make_client() as client:
+        monkeypatch.setattr(CameraManager, "_make_reader", lambda self: _BlackReader(self.settings))
+        client.post("/api/camera/start")
+        info = wait_for(client, lambda i: i["status"] == "error")
+        assert info["running"] is False
+        assert info["frameCount"] == 0
+        assert "blank/black" in info["error"]
+        assert info["backend"] == "dshow"
+
+
+class _ProbeHandle:
+    """Fake capture handle: yields the given sequence of frames/errors."""
+
+    def __init__(self, frames):
+        self._frames = list(frames)
+
+    def read(self):
+        got = self._frames.pop(0) if self._frames else None
+        if isinstance(got, Exception):
+            raise got
+        return got
+
+
+def test_select_backend_adopts_first_valid_backend() -> None:
+    def open_fn(name):
+        return _ProbeHandle([]) if False else _ProbeHandle([None, np.ones((8, 8, 3), dtype=np.uint8) * 255])
+
+    chosen, handle, attempts = select_backend(
+        ("msmf", "dshow"),
+        open_fn=open_fn,
+        read_fn=lambda h: h.read(),
+        release_fn=lambda h: None,
+        reject_black=True,
+        max_warmup=3,
+    )
+    assert chosen == "msmf"
+    assert handle is not None
+    assert attempts[0].valid_frame is True
+
+
+def test_select_backend_skips_black_backend_and_takes_next_valid() -> None:
+    def open_fn(name):
+        if name == "msmf":
+            return _ProbeHandle([np.zeros((8, 8, 3), dtype=np.uint8), np.zeros((8, 8, 3), dtype=np.uint8)])
+        return _ProbeHandle([np.ones((8, 8, 3), dtype=np.uint8) * 255])
+
+    chosen, _, attempts = select_backend(
+        ("msmf", "dshow"),
+        open_fn=open_fn,
+        read_fn=lambda h: h.read(),
+        release_fn=lambda h: None,
+        reject_black=True,
+        max_warmup=2,
+    )
+    assert chosen == "dshow"
+    assert attempts[0].opened is True and attempts[0].valid_frame is False
+    assert attempts[1].valid_frame is True
+
+
+def test_select_backend_reports_none_valid_with_diagnostics() -> None:
+    def open_fn(name):
+        return _ProbeHandle([np.zeros((8, 8, 3), dtype=np.uint8)])
+
+    chosen, handle, attempts = select_backend(
+        ("msmf", "dshow"),
+        open_fn=open_fn,
+        read_fn=lambda h: h.read(),
+        release_fn=lambda h: None,
+        reject_black=True,
+        max_warmup=1,
+    )
+    assert chosen is None and handle is None
+    assert len(attempts) == 2
+    assert all(a.opened and not a.valid_frame for a in attempts)  # honesty: no valid feed
+
+
+def test_select_backend_records_exceptions_from_read() -> None:
+    boom = RuntimeError("MF_E_INVALIDREQUEST (0x800706BE)")
+
+    def open_fn(name):
+        return _ProbeHandle([boom, boom])
+
+    chosen, handle, attempts = select_backend(
+        ("msmf",),
+        open_fn=open_fn,
+        read_fn=lambda h: h.read(),
+        release_fn=lambda h: None,
+        max_warmup=2,
+    )
+    assert chosen is None
+    # All probe reads were recorded as failed (the exact error text lives in the
+    # raised exception; here we verify the failure was swallowed, not fatal).
+    assert attempts[0].reads_failed == 2

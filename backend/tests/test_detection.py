@@ -78,6 +78,16 @@ def wait_for_detection_status(client: TestClient, want: str, timeout: float = 5.
     raise AssertionError(f"inferenceStatus {want!r} not reached")
 
 
+def wait_for_stable_detections(client: TestClient, n: int, timeout: float = 10.0) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        body = client.get("/api/detections").json()
+        if len(body.get("detections", [])) >= n:
+            return body
+        time.sleep(0.02)
+    raise AssertionError(f"stable detections {n} not reached")
+
+
 def test_default_config_is_off() -> None:
     assert config.DETECTION_ENABLED is False
 
@@ -116,9 +126,9 @@ def test_mock_detection_end_to_end() -> None:
 
         start_camera(client)
         ok = wait_for_detection_status(client, "ok")
-        assert ok["detectionCount"] == 3
+        assert ok["rawDetectionCount"] >= 3  # raw feed debounced into stable
 
-        dets = client.get("/api/detections").json()
+        dets = wait_for_stable_detections(client, 3)
         assert dets["enabled"] is True
         assert dets["frameWidth"] == 320
         assert dets["frameHeight"] == 240
@@ -133,6 +143,12 @@ def test_mock_detection_end_to_end() -> None:
             assert set(d) == {"class_name", "confidence", "x1", "y1", "x2", "y2", "timestamp"}
             assert 0 <= d["x1"] < d["x2"] <= 320
             assert 0 <= d["y1"] < d["y2"] <= 240
+        # Raw single-frame view is still available for debugging.
+        assert [d["class_name"] for d in dets["rawDetections"]] == [
+            "person",
+            "red_box",
+            "yellow_box",
+        ]
 
         # MJPEG route untouched: camera still streams with detection on.
         assert client.get("/api/camera/snapshot").status_code == 200

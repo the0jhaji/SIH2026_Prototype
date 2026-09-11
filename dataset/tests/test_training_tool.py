@@ -63,7 +63,7 @@ def test_make_data_yaml_writes_valid_yaml(split_dataset, tmp_path):
     assert "train: train/images" in text
     assert "val: val/images" in text
     assert "test: test/images" not in text  # test empty -> omitted
-    assert "nc: 5" in text
+    assert f"nc: {len(classes)}" in text
     for i, name in enumerate(classes):
         assert f"  {i}: {name}" in text
 
@@ -77,7 +77,7 @@ def test_make_data_yaml_histogram_counts_boxes(split_dataset, tmp_path):
 
 def test_class_histogram_matches_labels(split_dataset):
     split_root, _ = split_dataset
-    hist = class_histogram(split_root, 5)
+    hist = class_histogram(split_root, len(classes_default))
     assert sum(hist["train"]) + sum(hist["val"]) == 12
 
 

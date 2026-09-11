@@ -10,6 +10,7 @@ import type { ExperimentState } from '../domain/types'
 import { BackendSource } from '../sources/BackendSource'
 import { SimulatedSource } from '../sources/SimulatedSource'
 import type { EventSource } from '../sources/types'
+import type { SafetyWsMessage } from './useSafety'
 
 export type ExperimentMode = 'backend' | 'local'
 
@@ -32,6 +33,7 @@ export function useExperiment() {
   const [mode, setMode] = useState<ExperimentMode>('backend')
   const [connected, setConnected] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [safetyMessage, setSafetyMessage] = useState<SafetyWsMessage | null>(null)
 
   const stateRef = useRef(state)
   const modeRef = useRef(mode)
@@ -53,6 +55,7 @@ export function useExperiment() {
     const backend = new BackendSource('/ws', {
       onSnapshot: commit,
       onStatusChange: setConnected,
+      onSafetyMessage: setSafetyMessage,
     })
     backendRef.current = backend
     backend.connect()
@@ -130,5 +133,17 @@ export function useExperiment() {
     [],
   )
 
-  return { state, mode, connected, busy, start, stop, setMode: chooseMode }
+  const clearSafetyMessage = useCallback(() => setSafetyMessage(null), [])
+
+  return {
+    state,
+    mode,
+    connected,
+    busy,
+    start,
+    stop,
+    setMode: chooseMode,
+    safetyMessage,
+    clearSafetyMessage,
+  }
 }

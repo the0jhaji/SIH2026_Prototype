@@ -15,13 +15,21 @@ logger = logging.getLogger("astraai.service")
 
 
 class ExperimentService:
-    def __init__(self, experiment: ExperimentDef, manager: ConnectionManager, store: LogStore) -> None:
+    def __init__(
+        self,
+        experiment: ExperimentDef,
+        manager: ConnectionManager,
+        store: LogStore,
+        *,
+        detection_callback=None,
+    ) -> None:
         self.experiment = experiment
         self.manager = manager
         self.store = store
         self.session = ExperimentSession(experiment)
         self.task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
+        self._detection_callback = detection_callback
 
     def snapshot(self) -> dict:
         return self.session.snapshot()
@@ -49,6 +57,11 @@ class ExperimentService:
                         payload = detection.model_dump()
                         await self.manager.broadcast({"type": "detection", "data": payload})
                         await self._publish(self.session.on_detection(detection))
+                        if self._detection_callback is not None:
+                            try:
+                                self._detection_callback(detection)
+                            except Exception:  # noqa: BLE001
+                                logger.exception("Detection callback failed")
                         if self.session.status == "COMPLETED":
                             break
                 except asyncio.CancelledError:

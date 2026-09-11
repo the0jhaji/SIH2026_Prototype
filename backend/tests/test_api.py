@@ -116,5 +116,11 @@ def test_websocket_handshake_and_ping() -> None:
             snapshot = ws.receive_json()
             assert snapshot["type"] == "state"
             assert snapshot["data"]["status"] == "IDLE"
+            safety = ws.receive_json()
+            assert safety["type"] == "safety"
+            assert "mission_state" in safety["data"]
+            engine = ws.receive_json()
+            assert engine["type"] == "experiment_engine"
+            assert engine["data"]["status"] == "NOT_STARTED"
             ws.send_json({"type": "ping"})
             assert ws.receive_json()["type"] == "pong"

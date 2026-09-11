@@ -21,6 +21,11 @@ is **no upload, no cloud, no network dependency** in the recorder.
 | `scripts/install_detection_model.py` | install a trained ONNX + `.names` into `models/detection/` (Phase 4C) |
 | `training_tool.py`  | shared Phase 4C logic: data.yaml export, class histogram, model install (pure, testable) |
 | `requirements-train.txt` | **optional** ultralytics trainer env (runtime never needs it) |
+| `roboflow/`         | downloaded **everyday-objects** export (train/valid + `data.yaml`); `roboflow/split/` is the prepared train/val/test (Phase 4C+) — separate from the app's `raw/` object set |
+| `roboflow_tool.py`  | shared **roboflow bridge**: flat-export split, detection-label normalisation (drops seg-polygon rows), data.yaml, model install (pure, testable) |
+| `scripts/prepare_roboflow.py` | build `roboflow/split/{train,val,test}` + `data.yaml` from the download |
+| `scripts/train_roboflow.py`   | lightweight ultralytics trainer (`yolov8n`, small epochs default) for the roboflow split |
+| `scripts/evaluate_roboflow.py` | score a trained ONNX through the real runtime detector on the test holdout |
 | `dataset_tool.py`  | shared capture logic: session creation, metadata, manifest (pure, testable) |
 | `annotation/`      | dev-only browser annotation tool (stdlib `http.server`, no new deps) + `annotator.py` shared logic |
 | `tests/`           | session/config + annotation/split/validation tests (no camera/device needed) |
@@ -284,3 +289,87 @@ genuinely drawn.
 ```powershell
 backend\.venv\Scripts\python.exe dataset\overlay_smoke.py --camera 0
 ```
+
+## Roboflow everyday-objects set (Phase 4C+)
+
+`roboflow/` is a **downloaded, pre-labelled** YOLOv8-format export
+(`train/` + `valid/`, 15 everyday-object classes: Bag, Book, Bottle, Cell
+Phone, Cup, Fork, Keys, Laptop, Paper, Pen, Spects, Spoon, Stairs, Wallet,
+Watch). It is intentionally separate from the app's own `raw/` object set (a
+webcam session of the experiment scene): two independent sources feeding the
+same runtime detector via its famous `ONNX + .names` contract.
+
+### Existing no-weights paths
+
+You do **not** need a trained model to see detection run today:
+
+- `DETECTION_BACKEND=mock` — deterministic `person 0.95 / red_box 0.91 /
+  yellow_box 0.89`, no weights. See `backend/run_mock_demo.ps1`.
+- `DETECTION_BACKEND=heuristic` — real pixels, model-free. See
+  `backend/run_camera_demo.ps1`.
+
+### Prepare the download (train/val/test + data.yaml)
+
+The export has no `test/` split and a `data.yaml` with broken relative paths,
+so we normalise it once into `roboflow/split/`:
+
+```powershell
+.\\.venv\\Scripts\\python.exe dataset\\scripts\\prepare_roboflow.py
+# -> dataset/roboflow/split/{train,val,test}/{images,labels} + split/data.yaml
+#    train=16052 val=1540 test=171  (a 10% holdout carved from `valid`)
+```
+
+This bridge (unlike `prepare_split.py`) works on the **flat** Roboflow layout
+and normalises labels to **bounding-box rows only** — Roboflow sometimes
+exports instance-segmentation polygons (class + N coordinate pairs) that
+duplicate the box; those rows are dropped for detection training, matching
+ultralytics box-only training. Nothing in the source is modified.
+
+### Train (lightweight, small default run)
+
+Ultralytics stays **optional** — it is only required on the training machine
+(`dataset/requirements-train.txt`), never at runtime. Create a dedicated venv:
+
+```powershell
+python -m venv .venv-train
+.venv-train\\Scripts\\pip install -r dataset\\requirements-train.txt
+# quick verify run (3 epochs, yolov8n = ~6MB model):
+.venv-train\\Scripts\\python.exe dataset\\scripts\\train_roboflow.py --epochs 3
+# real run:
+.venv-train\\Scripts\\python.exe dataset\\scripts\\train_roboflow.py --epochs 60 --imgsz 640
+```
+
+The script fails fast with a clear message if ultralytics is missing, and
+prints where the trained `best.pt`/`best.onnx` land under `dataset/runs/`.
+
+### Evaluate through the real runtime detector
+
+The exported ONNX is scored with the **exact consumer the backend uses**
+(`ai/detection/yolo_detector.YoloDetector`), so you can trust the result when
+you switch to `DETECTION_BACKEND=yolo`:
+
+```powershell
+# 1. export best.pt -> ONNX (from .venv-train):
+.venv-train\\Scripts\\yolo export model=dataset/runs/train/weights/best.pt format=onnx
+# 2. evaluate on the test holdout (backend venv, no ultralytics):
+.\\.venv\\Scripts\\python.exe dataset\\scripts\\evaluate_roboflow.py --onnx dataset/runs/train/weights/best.onnx
+```
+
+### Install + integrate (localhost, not committed)
+
+```powershell
+# writes models/detection/roboflow.onnx + roboflow.names (15 classes, taken
+# from the roboflow data.yaml), leaving the app's own yolov8n.onnx/.names
+# untouched:
+.\\.venv\\Scripts\\python.exe dataset\\scripts\\install_detection_model.py `
+    --onnx <best.onnx> --classes dataset\\roboflow\\split\\data.yaml --dest models\\detection\\roboflow.onnx
+# run the backend on the everyday-objects model:
+$env:DETECTION_ENABLED="true"; $env:DETECTION_BACKEND="yolo"
+$env:DETECTION_MODEL_PATH="detection/roboflow.onnx"
+.\\.venv\\Scripts\\python.exe -m uvicorn app.main:app --port 8000 --app-dir backend
+```
+
+See `models/detection/README.md` for the `ONNX + .names` runtime contract and
+the honest limitation that a generic YOLO model does not recognise the Astra
+`experiment_box`/`target_area` classes — those still need the app's own
+trained model.

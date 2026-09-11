@@ -75,6 +75,15 @@ its own daemon thread and exposes `GET /api/detection/status` +
   HSV-hue blobs. Deterministic for synthetic input, imperfect on live scenes,
   and it deliberately **never** reports `experiment_box`/`target_area` — those
   honestly require a trained model.
+- `DetectionService` emits **two feeds**: `detections` (stable) and
+  `rawDetections` (current-frame, debugging). A `TemporalTracker`
+  (`backend/app/detection_tracker.py`) promotes a raw detection to stable only
+  after `DETECTION_DEBOUNCE_FRAMES` (default 2) consecutive frames and
+  EMA-smooths confidence+box (`DETECTION_EMA_ALPHA`, default 0.35). It never
+  invents detections; disappearance still removes the object the same frame it
+  vanishes (absence/down signals are never delayed). `DETECTION_CV_THREADS`
+  (default 0 = auto) caps the OpenCV thread pool explicitly; on Windows the
+  detector daemon thread gets a priority bump (Best-effort, never fatal).
 - YoloDetector reuses `ai/pipeline/yolo.py` helpers (letterbox, postprocess,
   `resolve_weights_path`); a `.names` file next to the ONNX overrides classes.
 - The DetectionService thread calls only `camera_manager.latest_capture()`
@@ -127,6 +136,42 @@ at runtime (same `Detection` shape the scripted feed always used). Rules:
   separate, honest sidebar.
 - `ExperimentService.start(perception)` only needs an async `detections()`
   iterator — swap sources without touching decision-making.
+
+### Astronaut safety monitoring (Phase 6)
+
+`backend/app/safety/` is the **active core** (the box experiment is a decoupled
+legacy demo). `SafetyService` pulls `detection_service.latest()`, runs the
+`HazardEngine` (temporal confirmation + microgravity risk scoring from the
+config-driven `hazards.json` KB), the `EmergencyManager` (rules backend:
+absence/stillness/collision), the `SafetyMonitor` (NORMAL→OBSERVING→CAUTION→
+WARNING→CRITICAL→EMERGENCY), `AlertManager` (dedup by root-cause `key`,
+escalate-in-place, cooldown, ack) and the `IncidentLog` (evidence frame +
+metadata + staged `escalation.json`). Rules:
+
+- `backend/app/config.py`: `SAFETY_ENABLED` true by default;
+  `EARTH_ESCALATION_ENABLED` true when unset; `MOCK_SCENE` (empty = `bas`);
+  hazard/scene config in `hazards.json` is DATA, never code. One-frame hazards
+  are capped at CAUTION until `SAFETY_PERSIST_FRAMES`; a **stale** feed
+  (camera off / detector error) retains the last scene and never
+  auto-resolves or auto-escalates — the monitor must never lie on a dead feed.
+- Honest wording everywhere: "possible hazard / emergency candidate / risk
+  assessment", never medical diagnoses; Earth escalation staged locally as
+  `EARTH_ESCALATION_PACKAGE_READY` (nothing is transmitted). Confirmed
+  CRITICAL, crew-near WARNING, and confirmed emergencies open incidents.
+- `MockDetector(scene=...)` scenes live in `ai/detection/mock_detector.py`:
+  `bas`, `empty`, `space_station` (`person` + drifting `floating_tool` +
+  `loose_cable`), `safety_sequence` (same, then `person` clears →
+  `ASTRONAUT_UNOBSERVED`/`ASTRONAUT_DOWN`). `MOCK_SCENE` flows
+  via `DetectionService.…scene=config.MOCK_SCENE or None`. Generic YOLO does
+  not learn these classes; keep that honest in docs.
+- Backend tests: `backend/tests/test_safety.py` (19 tests, `StubDetection` +
+  `build_safety_client`; camera-free). `backend/tests/test_api.py` consumes the
+  extra `{"type":"safety"}` WS message on connect.
+- Frontend: `domain/safety.ts` (snapshot/alert/incident/station mirrors),
+  `hooks/useSafety.ts` (1 s polling + `onWsMessage` WS ingest), new views in
+  `views/` under a safety-first nav (`Mission`, `Camera`, `Hazards`, `Crew`,
+  `Alerts`, `Station`, `Earth`, `Logs`; legacy box demo = `Demo` tab). Keep
+  `npm run test:reducer`, `lint`, `build` green after changes.
 
 ### Dataset (Phase 4A)
 

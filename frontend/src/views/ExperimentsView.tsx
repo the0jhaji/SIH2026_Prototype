@@ -3,8 +3,10 @@ import { expectedStep } from '../domain/experiment'
 import type { CameraInfo } from '../domain/camera'
 import type { DetectionResult } from '../domain/detection'
 import type { ExperimentMode } from '../hooks/useExperiment'
+import type { EngineSnapshot } from '../hooks/useExperimentEngine'
 import type { ExperimentState } from '../domain/types'
 import { LiveFeed } from '../components/LiveFeed'
+import { ExperimentPanel } from '../components/ExperimentPanel'
 
 interface Props {
   state: ExperimentState
@@ -20,6 +22,10 @@ interface Props {
   busy: boolean
   onStart: () => void
   onStop: () => void
+  engineSnapshot: EngineSnapshot | null
+  engineOffline: boolean
+  onEngineStart: () => void
+  onEngineStop: () => void
 }
 
 const ACTION_LABEL: Record<string, string> = {
@@ -42,6 +48,10 @@ export function ExperimentsView({
   busy,
   onStart,
   onStop,
+  engineSnapshot,
+  engineOffline: _engineOffline,
+  onEngineStart,
+  onEngineStop,
 }: Props) {
   const running = state.status === 'RUNNING'
   const expected = expectedStep(state.experiment, state.currentStepIndex)
@@ -86,6 +96,15 @@ export function ExperimentsView({
 
       {/* Details + procedure + camera */}
       <div className="space-y-4">
+        {/* Engine panel (rich state + next-step + violations) */}
+        <ExperimentPanel
+          snapshot={engineSnapshot}
+          running={running}
+          onStart={onEngineStart}
+          onStop={onEngineStop}
+          busy={busy}
+        />
+
         <section className="panel p-4">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">

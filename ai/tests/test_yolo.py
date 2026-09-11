@@ -121,6 +121,47 @@ def test_nms_keeps_distinct_classes() -> None:
     assert sorted(d.class_name for d in dets) == ["person", "target_area"]
 
 
+# ------------------------------------------------ mismatched class-width tensors
+
+def test_decode_wider_model_behind_small_names() -> None:
+    # A COCO model (4 + 80 features) decoded through a 5-name override: the
+    # feature axis no longer matches 4 + len(classes), so orientation must be
+    # inferred from the shape, not the class count. person (class id 0) must
+    # survive; an out-of-range class id (56) must be dropped.
+    out = np.zeros((1, 84, 2), dtype=np.float32)
+    out[0, :4, 0] = [0.5, 0.5, 0.15, 0.30]
+    out[0, 4 + 0, 0] = 0.9  # person
+    out[0, :4, 1] = [0.5, 0.5, 0.15, 0.30]
+    out[0, 4 + 56, 1] = 0.9  # chair-like id 56 → outside the 5-name map
+    dets = postprocess_yolov8(out, input_size=640, scale=1.0, dx=0.0, dy=80.0,
+                              frame_width=640, frame_height=480, classes=DEFAULT_CLASSES)
+    assert [d.class_name for d in dets] == ["person"]
+
+
+def test_decode_pixel_space_boxes_normalized() -> None:
+    # Some exports emit cx,cy,w,h already in input_size pixels instead of
+    # normalized [0, 1]; the decoder must normalize them before decoding.
+    # 0.5*640 / 0.15*640 / 0.3*640 in pixels == the reference score below.
+    out = np.zeros((1, 4 + len(DEFAULT_CLASSES), 1), dtype=np.float32)
+    out[0, :4, 0] = [0.5 * 640, 0.5 * 640, 0.15 * 640, 0.30 * 640]
+    out[0, 4 + 2, 0] = 1.0  # red_box
+    dets = postprocess_yolov8(out, input_size=640, scale=1.0, dx=0.0, dy=80.0,
+                              frame_width=640, frame_height=480, classes=DEFAULT_CLASSES)
+    assert len(dets) == 1
+    assert dets[0].bounding_box.as_tuple() == (272, 144, 96, 192)
+
+
+def test_decode_pixel_boxes_wide_model_transposed() -> None:
+    # Combined regression: wider model (84 features) + pixel-space boxes.
+    out = np.zeros((1, 84, 2), dtype=np.float32)
+    out[0, :4, 0] = [0.5 * 640, 0.5 * 640, 0.15 * 640, 0.30 * 640]
+    out[0, 4 + 0, 0] = 0.9  # person
+    dets = postprocess_yolov8(out, input_size=640, scale=1.0, dx=0.0, dy=80.0,
+                              frame_width=640, frame_height=480, classes=DEFAULT_CLASSES)
+    assert [d.class_name for d in dets] == ["person"]
+    assert dets[0].bounding_box.as_tuple() == (272, 144, 96, 192)
+
+
 # ---------------------------------------------------------------- model paths
 
 def test_resolve_default_weights_tail() -> None:

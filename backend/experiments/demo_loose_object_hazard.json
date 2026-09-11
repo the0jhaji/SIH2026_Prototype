@@ -1,0 +1,158 @@
+{
+  "schemaVersion": "1.0",
+  "id": "loose-object-hazard-01",
+  "name": "Loose Object Hazard Detection",
+  "prototype": true,
+  "disclaimer": "Real-camera demo experiment. Every expectedObjects entry is a class the loaded YOLOv8n COCO-80 model can actually detect (person, bottle, cell phone, knife, ...). The experiment NEVER uses pen / red_box / yellow_box / experiment_box / target_area — those require a custom-trained model (see backend/experiments/README). The hazard side comes from the config-driven hazards.json knowledge base, not from this sequence.",
+  "description": "A controlled loose-object hazard scene: the astronaut is in view (normal scene), a loose bottle appears, a second loose object (cell phone) appears, a sharp object (knife) appears, then a multi-object scene. The safety monitor (not the experiment state machine) is what escalates CAUTION/WARNING/CRITICAL and opens alerts.",
+  "initialState": {
+    "location": "monitored module",
+    "looseObjects": [],
+    "sharpObjects": [],
+    "astronautInView": false
+  },
+  "objects": [
+    { "id": "person", "classId": 0, "name": "Person", "role": "astronaut" },
+    { "id": "sports ball", "classId": 32, "name": "Sports Ball", "role": "object" },
+    { "id": "bottle", "classId": 39, "name": "Bottle", "role": "object" },
+    { "id": "cup", "classId": 41, "name": "Cup", "role": "object" },
+    { "id": "fork", "classId": 42, "name": "Fork", "role": "object" },
+    { "id": "knife", "classId": 43, "name": "Knife", "role": "object" },
+    { "id": "cell phone", "classId": 67, "name": "Cell Phone", "role": "object" },
+    { "id": "book", "classId": 73, "name": "Book", "role": "object" },
+    { "id": "scissors", "classId": 76, "name": "Scissors", "role": "object" }
+  ],
+  "activities": [
+    "SCENE_NORMAL",
+    "INTRODUCE_LOOSE_OBJECT",
+    "INTRODUCE_SECOND_LOOSE",
+    "INTRODUCE_SHARP_OBJECT",
+    "MULTI_OBJECT_SCENE",
+    "COMPLETE"
+  ],
+  "steps": [
+    {
+      "id": "step1",
+      "order": 1,
+      "activity": "SCENE_NORMAL",
+      "label": "Normal scene — astronaut in view",
+      "description": "The astronaut is detected. Detection list is populated and the safe percentage updates; no hazard alert is expected.",
+      "expectedObjects": ["person"]
+    },
+    {
+      "id": "step2",
+      "order": 2,
+      "activity": "INTRODUCE_LOOSE_OBJECT",
+      "label": "Loose bottle introduced into the scene",
+      "description": "A bottle is moved into the monitored area. The safety monitor assesses it as a possible free-floating-object hazard (CAUTION/WARNING depending on persistence/proximity) and opens an alert when confirmed.",
+      "expectedObjects": ["bottle"]
+    },
+    {
+      "id": "step3",
+      "order": 3,
+      "activity": "INTRODUCE_SECOND_LOOSE",
+      "label": "Second loose object introduced",
+      "description": "A cell phone joins the scene so multiple independent objects are tracked and assessed simultaneously.",
+      "expectedObjects": ["cell phone"]
+    },
+    {
+      "id": "step4",
+      "order": 4,
+      "activity": "INTRODUCE_SHARP_OBJECT",
+      "label": "Sharp object introduced",
+      "description": "A knife enters the scene. The safety monitor treats it as a sharp-object hazard candidate (CRITICAL per hazards.json) — demonstrated as an emergency-escalation example, confirmed only after persistence.",
+      "expectedObjects": ["knife"]
+    },
+    {
+      "id": "step5",
+      "order": 5,
+      "activity": "MULTI_OBJECT_SCENE",
+      "label": "Multi-object scene",
+      "description": "Astronaut plus bottle, cell phone and knife appear simultaneously. All supported objects appear in the detection list and each carries its own hazard assessment.",
+      "expectedObjects": ["person", "bottle", "cell phone", "knife"]
+    },
+    {
+      "id": "step6",
+      "order": 6,
+      "activity": "COMPLETE",
+      "label": "Scene cleared — back to normal",
+      "description": "The loose and sharp objects are removed; only the astronaut remains. Terminal step.",
+      "expectedObjects": ["person"],
+      "terminal": true
+    }
+  ],
+  "validationRules": {
+    "mode": "strict-sequence",
+    "advanceOnMatch": true,
+    "stayOnStepOnError": true,
+    "nextExpectedOnError": "unchanged - the offending step must be performed again to advance",
+    "skippedStepEvidence": "SKIPPED_STEP is advisory and is only emitted together with OUT_OF_SEQUENCE; progress advances exclusively on STEP_MATCHED",
+    "lowConfidenceThreshold": 0.5,
+    "terminalSteps": ["COMPLETE"],
+    "canonicalResultLabels": ["CORRECT", "OUT_OF_SEQUENCE", "SKIPPED", "REPEATED", "UNKNOWN", "LOW_CONFIDENCE"],
+    "canonicalEventKinds": [
+      "STEP_MATCHED",
+      "OUT_OF_SEQUENCE",
+      "SKIPPED_STEP",
+      "REPEATED_STEP",
+      "UNKNOWN_ACTIVITY",
+      "LOW_CONFIDENCE",
+      "EXPERIMENT_STARTED",
+      "EXPERIMENT_STOPPED",
+      "EXPERIMENT_COMPLETED",
+      "RECORDING_STARTED",
+      "RECORDING_STOPPED"
+    ]
+  },
+  "errorTypes": [
+    {
+      "code": "CORRECT",
+      "kind": "STEP_MATCHED",
+      "when": "detected activity equals the expected step",
+      "advance": true,
+      "progressEffect": "advance to next step"
+    },
+    {
+      "code": "OUT_OF_SEQUENCE",
+      "kind": "OUT_OF_SEQUENCE",
+      "when": "known activity from a later step is detected before the expected step",
+      "advance": false,
+      "progressEffect": "none - expected step stays"
+    },
+    {
+      "code": "SKIPPED",
+      "kind": "SKIPPED_STEP",
+      "when": "advisory emitted together with OUT_OF_SEQUENCE (a later step implies earlier steps were skipped)",
+      "advance": false,
+      "progressEffect": "none"
+    },
+    {
+      "code": "REPEATED",
+      "kind": "REPEATED_STEP",
+      "when": "known activity from an already-completed step is detected again",
+      "advance": false,
+      "progressEffect": "none"
+    },
+    {
+      "code": "UNKNOWN",
+      "kind": "UNKNOWN_ACTIVITY",
+      "when": "detected activity is null or not defined in this experiment",
+      "advance": false,
+      "progressEffect": "none"
+    },
+    {
+      "code": "LOW_CONFIDENCE",
+      "kind": "LOW_CONFIDENCE",
+      "when": "detected activity confidence is below the validationRules.lowConfidenceThreshold",
+      "advance": false,
+      "progressEffect": "none - treat the detection as uncertain"
+    }
+  ],
+  "example": {
+    "expected": "INTRODUCE_LOOSE_OBJECT",
+    "observed": "INTRODUCE_SHARP_OBJECT",
+    "result": "OUT_OF_SEQUENCE",
+    "nextExpected": "INTRODUCE_LOOSE_OBJECT",
+    "note": "The sequence advances only when the actual scene matches the expected step; the safety monitor runs independently and assesses whatever is actually detected."
+  }
+}

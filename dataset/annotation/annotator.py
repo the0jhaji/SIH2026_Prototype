@@ -21,7 +21,16 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-DEFAULT_CLASSES = ["person", "experiment_box", "red_box", "yellow_box", "target_area"]
+DEFAULT_CLASSES = [
+    "person",
+    "knife",
+    "pen",
+    "red_box",
+    "yellow_box",
+    "floating_tool",
+    "loose_cable",
+    "bottle",
+]
 CLASSES_FILE = Path(__file__).resolve().parent / "classes.json"
 
 #: Deterministic per-class box colors (indexed by class id).

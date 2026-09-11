@@ -51,6 +51,7 @@ class YoloDetector(BaseDetector):
         iou_threshold: float = 0.45,
         use_cuda: bool = False,
         names_path: Optional[str] = None,
+        cv_threads: Optional[int] = None,
     ) -> None:
         self.model_path = model_path
         self.classes = list(classes) if classes else list(DEFAULT_CLASSES)
@@ -59,6 +60,7 @@ class YoloDetector(BaseDetector):
         self.iou_threshold = iou_threshold
         self.use_cuda = use_cuda
         self.names_path = names_path
+        self.cv_threads = cv_threads
         self._net: Optional[cv2.dnn.Net] = None
         self._weights: Path | None = None
         self._error: str | None = None
@@ -85,6 +87,9 @@ class YoloDetector(BaseDetector):
         if names:
             self.classes = names
         net = cv2.dnn.readNetFromONNX(str(resolved))
+        if self.cv_threads and self.cv_threads > 0:
+            # OpenCV caps the parallel worker pool process-wide (no per-Net API).
+            cv2.setNumThreads(self.cv_threads)
         if self.use_cuda:
             try:
                 net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)

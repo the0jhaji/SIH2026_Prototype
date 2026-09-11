@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -17,6 +18,10 @@ class Detection:
 
     Coordinates are ``(x1, y1)`` top-left and ``(x2, y2)`` bottom-right,
     exclusive — the same convention OpenCV rectangles use.
+
+    ``instance_id`` is only set for generic/unknown-object detections (a stable
+    per-track label like ``unknown-3``); known-class detections leave it None so
+    the plain 7-field payload shape is unchanged.
     """
 
     class_name: str
@@ -26,6 +31,7 @@ class Detection:
     x2: int
     y2: int
     timestamp: int  # epoch milliseconds
+    instance_id: Optional[str] = None
 
     @property
     def width(self) -> int:
@@ -37,7 +43,7 @@ class Detection:
 
     def to_dict(self) -> dict:
         """Plain JSON-ready structure with the exact fields of this phase."""
-        return {
+        payload = {
             "class_name": self.class_name,
             "confidence": round(float(self.confidence), 4),
             "x1": self.x1,
@@ -46,6 +52,9 @@ class Detection:
             "y2": self.y2,
             "timestamp": self.timestamp,
         }
+        if self.instance_id is not None:
+            payload["instance_id"] = self.instance_id
+        return payload
 
 
 def now_ms() -> int:

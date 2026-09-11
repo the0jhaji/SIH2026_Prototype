@@ -87,15 +87,26 @@ def postprocess_yolov8(
     if arr.ndim == 3:
         arr = arr[0]
     # Orient rows = detections, columns = features (4 + C). YOLOv8 exports
-    # may be (4 + C, N) or (N, 4 + C); models trained with more classes than
-    # the configured list widen the feature axis, so detect that case too.
+    # may arrive as (N, 4 + C) or (4 + C, N), and the model's true class
+    # count can be larger than the configured ``classes`` list (e.g. a
+    # generic COCO model behind a smaller .names override) — so orient by
+    # shape, not by ``num_classes``.
     if arr.shape[1] != 4 + num_classes and (
-        arr.shape[0] == 4 + num_classes or arr.shape[1] < arr.shape[0]
+        arr.shape[0] == 4 + num_classes
+        or (arr.shape[0] < arr.shape[1] and arr.shape[0] <= 4 + 1000)
+        or arr.shape[1] < 4 + num_classes
     ):
         arr = arr.T
     assert arr.shape[1] >= 4 + num_classes, (
         f"model output width {arr.shape[1]} < 4 + {num_classes} classes"
     )
+
+    # Some exports emit box coordinates already in ``input_size`` pixel
+    # units instead of normalized [0, 1]; normalize so the decode below
+    # uses a single convention.
+    if arr.shape[0] and float(arr[:, :4].max()) > 1.5:
+        arr = arr.copy()
+        arr[:, :4] /= input_size
 
     class_scores = arr[:, 4:]
     scores = class_scores.max(axis=1)

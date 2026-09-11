@@ -376,15 +376,18 @@ export function SimulatedFeed({ state }: { state: ExperimentState }) {
 export function LiveCameraFeed({
   streamUrl,
   detections = [],
+  unknownDetections = [],
   frameWidth = null,
   frameHeight = null,
 }: {
   streamUrl: string
   detections?: Detection[]
+  unknownDetections?: Detection[]
   frameWidth?: number | null
   frameHeight?: number | null
 }) {
   const showBoxes = frameWidth != null && frameHeight != null && frameWidth > 0 && frameHeight > 0
+  const all = [...detections, ...unknownDetections]
   return (
     <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-slate-200 dark:border-slate-800 dark:bg-slate-950">
       <img
@@ -394,7 +397,8 @@ export function LiveCameraFeed({
       />
       {showBoxes && (
         <div className="pointer-events-none absolute inset-0">
-          {detections.map((d, i) => {
+          {all.map((d, i) => {
+            const isUnknown = d.class_name === 'unknown_object'
             const left = (d.x1 / (frameWidth as number)) * 100
             const top = (d.y1 / (frameHeight as number)) * 100
             const width = ((d.x2 - d.x1) / (frameWidth as number)) * 100
@@ -408,11 +412,17 @@ export function LiveCameraFeed({
                   top: `${top}%`,
                   width: `${width}%`,
                   height: `${height}%`,
-                  borderColor: CLASS_COLOR[d.class_name] ?? '#38bdf8',
+                  borderColor: isUnknown ? '#ffffff' : CLASS_COLOR[d.class_name] ?? '#38bdf8',
+                  borderStyle: isUnknown ? 'dashed' : 'solid',
                 }}
               >
-                <span className="absolute -top-5 left-0 rounded bg-black/70 px-1 py-0.5 font-mono text-[10px] font-bold tracking-wide text-slate-100">
-                  {d.class_name.replace(/_/g, ' ')} {Math.round(d.confidence * 100)}%
+                <span
+                  className={`absolute -top-5 left-0 rounded px-1 py-0.5 font-mono text-[10px] font-bold tracking-wide ${
+                    isUnknown ? 'bg-white/85 text-slate-900' : 'bg-black/70 text-slate-100'
+                  }`}
+                >
+                  {isUnknown ? (d.instance_id ?? 'unknown') : d.class_name.replace(/_/g, ' ')}{' '}
+                  {Math.round(d.confidence * 100)}%
                 </span>
               </div>
             )
@@ -430,12 +440,14 @@ export function LiveFeed({
   state,
   streamUrl,
   detections = [],
+  unknownDetections = [],
   frameWidth = null,
   frameHeight = null,
 }: {
   state: ExperimentState
   streamUrl?: string | null
   detections?: Detection[]
+  unknownDetections?: Detection[]
   frameWidth?: number | null
   frameHeight?: number | null
 }) {
@@ -444,6 +456,7 @@ export function LiveFeed({
       <LiveCameraFeed
         streamUrl={streamUrl}
         detections={detections}
+        unknownDetections={unknownDetections}
         frameWidth={frameWidth}
         frameHeight={frameHeight}
       />

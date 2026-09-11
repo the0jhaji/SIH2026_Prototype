@@ -1,0 +1,8 @@
+# Custom experiment model - auto-labeled from live camera
+path: C:\Users\Adarsh\Desktop\Coding\SIH2026_Prototype\dataset\experiment_train
+train: train/images
+val: val/images
+nc: 2
+names:
+  0: red_box
+  1: yellow_box

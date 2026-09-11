@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import type { ExperimentMode } from '../hooks/useExperiment'
 import type { CameraInfo } from '../domain/camera'
 import type { DetectionStatus } from '../domain/detection'
+import type { SafetySnapshot } from '../domain/safety'
+import { MISSION_COLORS } from '../domain/safety'
 import { useTheme } from '../hooks/useTheme'
 import { formatClock } from '../lib/time'
 import type { ViewKey } from './nav'
@@ -19,6 +21,8 @@ interface Props {
   cameraOffline: boolean
   detection: DetectionStatus | null
   detectionOffline: boolean
+  safety: SafetySnapshot | null
+  safetyOffline: boolean
   onStart: () => void
   onStop: () => void
   onModeChange: (mode: ExperimentMode) => void
@@ -26,7 +30,7 @@ interface Props {
 
 export function Header({
   view,
-  status,
+  status: _status,
   running,
   recording,
   mode,
@@ -36,6 +40,8 @@ export function Header({
   cameraOffline,
   detection,
   detectionOffline,
+  safety,
+  safetyOffline,
   onStart,
   onStop,
   onModeChange,
@@ -50,6 +56,10 @@ export function Header({
 
   const camRunning = camera?.running === true && !cameraOffline
   const detectionOk = detection?.inferenceStatus === 'ok' && !detectionOffline
+  const mission = safetyOffline ? 'OFFLINE' : safety?.mission_state ?? 'STANDBY'
+  const missionOk = !safetyOffline && (safety?.monitoring ?? false) && !safety?.feed_stale
+  const missionColor = safetyOffline ? '#64748b' : MISSION_COLORS[safety?.mission_state ?? 'NORMAL']
+  const monitoring = safety?.monitoring ?? false
   const canStart = mode === 'local' ? !running : connected && !running
 
   return (
@@ -64,10 +74,29 @@ export function Header({
       </div>
 
       <div className="ml-auto flex items-center gap-2">
-        <Chip label="MISSION STATUS" value={status} running={running} accent="primary" />
+        <Chip
+          label="MISSION STATE"
+          value={mission}
+          running={missionOk}
+          accent="primary"
+          dot={missionColor}
+          pulse={safety?.mission_state === 'EMERGENCY' || safety?.mission_state === 'CRITICAL'}
+        />
+        <Chip
+          label="MONITOR"
+          value={monitoring ? (safety?.feed_stale ? 'STALE FEED' : 'ONLINE') : 'OFF'}
+          running={monitoring && !safety?.feed_stale}
+          accent="tertiary"
+        />
         <Chip
           label="AI ENGINE"
-          value={detectionOk ? detection?.detector ?? 'DETECTOR' : 'OFFLINE'}
+          value={
+            detectionOk
+              ? detection?.detector ?? 'DETECTOR'
+              : detection?.error
+                ? 'ERROR'
+                : 'OFFLINE'
+          }
           running={detectionOk}
           accent="tertiary"
         />
@@ -148,24 +177,33 @@ function Chip({
   value,
   running,
   accent,
+  dot,
+  pulse = false,
 }: {
   label: string
   value: string
   running: boolean
   accent: 'primary' | 'secondary' | 'tertiary'
+  dot?: string
+  pulse?: boolean
 }) {
-  const dot = {
+  const fallback = {
     primary: 'bg-primary',
     secondary: 'bg-secondary',
     tertiary: 'bg-tertiary',
   }[accent]
+  const color = dot ?? fallback
+  const isHex = color.startsWith('#')
   return (
     <div className="hidden flex-col items-start justify-center border border-outline-variant/40 bg-surface-container-low px-2 py-1 md:flex">
       <span className="font-mono text-[8px] uppercase tracking-widest text-on-surface-variant">
         {label}
       </span>
       <span className="flex items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-wider text-on-surface">
-        <span className={`h-1.5 w-1.5 ${running ? `${dot} animate-pulse` : 'bg-outline'}`} />
+        <span
+          className={`h-1.5 w-1.5 ${running ? (pulse ? 'animate-ping' : 'animate-pulse') : 'bg-outline'} ${!isHex && running ? color : ''}`}
+          style={isHex ? { background: running ? color : undefined } : undefined}
+        />
         {value}
       </span>
     </div>

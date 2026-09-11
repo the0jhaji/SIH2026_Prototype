@@ -24,9 +24,22 @@ if str(DATASET_DIR) not in sys.path:
     sys.path.insert(0, str(DATASET_DIR))
 
 from annotation.annotator import load_classes  # noqa: E402
+from roboflow_tool import load_roboflow_classes  # noqa: E402
 from training_tool import install_detection_model as _install  # noqa: E402
 
 DEFAULT_DEST = ROOT / "models" / "detection" / "yolov8n.onnx"
+
+
+def _load_class_list(path: str | None, parser: argparse.ArgumentParser) -> list[str]:
+    """Load the class vocabulary from a ``classes.json`` or a ``data.yaml``."""
+    if path is None:
+        return load_classes()
+    p = Path(path)
+    if not p.is_file():
+        parser.error(f"classes file not found: {p}")
+    if p.suffix.lower() in {".yaml", ".yml"}:
+        return load_roboflow_classes(p)
+    return load_classes(p)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -39,7 +52,12 @@ def main(argv: list[str] | None = None) -> None:
         default=str(DEFAULT_DEST),
         help=f"destination ONNX path (default: {DEFAULT_DEST})",
     )
-    parser.add_argument("--classes", default=None, help="path to classes.json")
+    parser.add_argument(
+        "--classes",
+        default=None,
+        help="classes.json (or Roboflow data.yaml) of the trained model; "
+        "defaults to annotation/classes.json",
+    )
     args = parser.parse_args(argv)
 
     if args.onnx is None:
@@ -50,7 +68,7 @@ def main(argv: list[str] | None = None) -> None:
         result = _install(
             Path(args.onnx),
             dest_path.parent,
-            classes=load_classes(args.classes),
+            classes=_load_class_list(args.classes, parser),
             dest_name=dest_path.name,
         )
     except FileNotFoundError as exc:
@@ -61,7 +79,8 @@ def main(argv: list[str] | None = None) -> None:
     print("Detector installed for the runtime:")
     print(f"  onnx : {result['onnx']}")
     print(f"  names: {result['names']}  ({', '.join(result['classes'])})")
-    print("\nStart the backend with the trained model:")
+    print("\nStart the backend with the trained model (set DETECTION_MODEL_PATH to the")
+    print("destination if you used a name other than yolov8n.onnx):")
     print('  $env:DETECTION_ENABLED="true"; $env:DETECTION_BACKEND="yolo";')
     print(
         "  .\\.venv\\Scripts\\python.exe -m uvicorn app.main:app --port 8000 "

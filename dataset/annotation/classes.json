@@ -1,9 +1,12 @@
 {
   "classes": [
     "person",
-    "experiment_box",
+    "knife",
+    "pen",
     "red_box",
     "yellow_box",
-    "target_area"
+    "floating_tool",
+    "loose_cable",
+    "bottle"
   ]
 }

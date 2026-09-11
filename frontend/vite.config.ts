@@ -6,6 +6,9 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
+    // Bind all interfaces (IPv4 + IPv6 loopback, LAN) to match the backend's
+    // 0.0.0.0 — Vite's default 'localhost' may resolve to ::1 only on Windows.
+    host: true,
     proxy: {
       // Phase 2+: forward API + WebSocket traffic to the FastAPI backend.
       '/api': 'http://localhost:8000',

@@ -57,26 +57,43 @@ def create_detector(
     classes: Optional[list[str]] = None,
     conf_threshold: float = 0.5,
     use_cuda: bool = False,
+    scene: str | None = None,
+    cv_threads: int | None = None,
 ) -> BaseDetector:
     """Build a detector instance by short name.
 
-    - ``mock`` — deterministic synthetic detections, no weights.
+    - ``mock`` — deterministic synthetic detections, no weights. ``scene``
+      selects a named scenario (``bas``, ``space_station``,
+      ``safety_sequence``); used for dev/test demos only.
     - ``yolo`` — YOLOv8 ONNX via OpenCV DNN (weights in ``models/detection/``).
-    - ``heuristic`` — real, model-free HSV color + motion detection.
+      ``cv_threads`` caps the OpenCV thread pool for the net (None = auto).
+    - ``dual`` — dual YOLO: COCO-80 general + custom experiment model,
+      merged with cross-model NMS.  Best for live experiment detection.
+    - ``heuristic`` — real, model-free HSV color + motion detection (dev/test
+      only — produces false positives on non-box colored objects).
     """
     from .heuristic_detector import ColorMotionDetector
     from .mock_detector import MockDetector
     from .yolo_detector import YoloDetector
 
     if kind == "mock":
-        return MockDetector()
+        return MockDetector(scene=scene or "bas")
     if kind == "yolo":
         return YoloDetector(
             model_path=model_path,
             classes=classes,
             conf_threshold=conf_threshold,
             use_cuda=use_cuda,
+            cv_threads=cv_threads,
+        )
+    if kind == "dual":
+        from .dual_yolo import DualYoloDetector
+
+        return DualYoloDetector(
+            conf_threshold=conf_threshold,
+            use_cuda=use_cuda,
+            cv_threads=cv_threads,
         )
     if kind == "heuristic":
         return ColorMotionDetector(conf_threshold=conf_threshold)
-    raise ValueError(f"Unknown detector kind: {kind!r} (expected 'mock', 'yolo' or 'heuristic')")
+    raise ValueError(f"Unknown detector kind: {kind!r} (expected 'mock', 'yolo', 'dual' or 'heuristic')")
