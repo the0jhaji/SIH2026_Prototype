@@ -57,6 +57,7 @@ def _env_float(name: str, default: float) -> float:
 CONFIRM_FRAMES = _env_int("ACTIVITY_CONFIRM_FRAMES", 3)
 MIN_CONFIDENCE = _env_float("ACTIVITY_MIN_CONFIDENCE", 0.5)
 CONFIRM_WINDOW_MS = _env_int("ACTIVITY_CONFIRM_WINDOW_MS", 2000)
+RECOVERY_ESCALATION_MS = _env_int("ACTIVITY_RECOVERY_ESCALATION_MS", 12000)
 
 
 class ExperimentStateEngine:
@@ -116,6 +117,8 @@ class ExperimentStateEngine:
         self._last_activity: Optional[dict] = None
         self._last_alert: Optional[dict] = None
         self._last_event: Optional[dict] = None
+        self._violation_started_at: Optional[float] = None
+        self._last_escalation_at: Optional[float] = None
 
     # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -171,6 +174,8 @@ class ExperimentStateEngine:
         self._last_activity = None
         self._last_alert = None
         self._last_event = None
+        self._violation_started_at = None
+        self._last_escalation_at = None
         self.state = RUNNING
         self.started_at = time.time()
 
@@ -232,7 +237,7 @@ class ExperimentStateEngine:
 
     def on_detection(self, detection: Detection) -> dict:
         """Process one perception-frame.  Returns the current snapshot."""
-        if self.state not in (RUNNING, WAITING_FOR_STEP, STEP_CANDIDATE, UNCERTAIN):
+        if self.state not in (RUNNING, WAITING_FOR_STEP, STEP_CANDIDATE, UNCERTAIN, SEQUENCE_VIOLATION):
             return self.snapshot()
 
         # Low confidence → UNCERTAIN (do not advance)
@@ -251,6 +256,8 @@ class ExperimentStateEngine:
 
         # ── matches expected ─────────────────────────────────────────────
         if expected and activity == expected.activity:
+            self._violation_started_at = None
+            self._last_escalation_at = None
             return self._handle_candidate(detection, detected_step, expected, "match")
 
         # ── known step, but wrong position ───────────────────────────────
@@ -379,9 +386,15 @@ class ExperimentStateEngine:
             f"Out of sequence: {observed_step.activity} while expected {expected.activity if expected else 'unknown'}",
             expected_step=expected.id if expected else None,
             observed_step=observed_step.id,
+            recovery=f"Return to {expected_label} before continuing.",
         )
+        now = time.monotonic()
+        if self._violation_started_at is None:
+            self._violation_started_at = now
+        self._announce_recovery_if_due()
         if self._voice:
             self._voice.announce_out_of_sequence(expected_label)
+            self._voice.announce_recovery(expected_label)
         self._emit_log(
             "out_of_sequence",
             expected_step=expected.id if expected else None,
@@ -408,6 +421,7 @@ class ExperimentStateEngine:
                         "SKIPPED_STEP",
                         f"Skipped: {skipped.label}",
                         step_id=skipped.id,
+                        recovery=f"Return to {skipped.label} before continuing.",
                     )
                     if self._voice:
                         self._voice.announce_skipped_step(skipped.label)
@@ -427,6 +441,19 @@ class ExperimentStateEngine:
 
         self.state = SEQUENCE_VIOLATION
         return self.snapshot()
+
+    def _announce_recovery_if_due(self) -> None:
+        if self._voice is None or self._violation_started_at is None:
+            return
+        now = time.monotonic()
+        last = self._last_escalation_at or self._violation_started_at
+        if now - last < RECOVERY_ESCALATION_MS / 1000:
+            return
+        expected = self.current_step
+        if expected is not None:
+            self._voice.announce_recovery(expected.label, critical=True)
+            self._emit_log("recovery_escalation", expected_step=expected.id, status="CRITICAL")
+        self._last_escalation_at = now
 
     def _handle_uncertain(self, detection: Detection, reason: str) -> dict:
         self._candidate_activity = None
@@ -488,4 +515,8 @@ class ExperimentStateEngine:
             "last_activity": self._last_activity,
             "last_alert": self._last_alert,
             "last_event": self._last_event,
+            "voice": {
+                "health": self._voice.health if self._voice else "disabled",
+                "queue_size": self._voice.queue_size if self._voice else 0,
+            },
         }

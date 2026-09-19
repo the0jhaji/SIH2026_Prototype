@@ -23,6 +23,8 @@ export interface Violation {
   message: string
   ts: string
   step_id?: string
+  expected_step?: string
+  recovery?: string
 }
 
 export interface EngineSnapshot {
@@ -41,6 +43,7 @@ export interface EngineSnapshot {
   last_activity: { step_id: string; activity: string; label: string; confidence: number } | null
   last_alert: Violation | null
   last_event: { kind: string; [key: string]: unknown } | null
+  voice: { health: string; queue_size: number }
 }
 
 const POLL_MS = 1000

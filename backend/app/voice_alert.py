@@ -146,6 +146,18 @@ class VoiceAlertService:
         except queue.Full:
             logger.debug("Voice queue full, dropping: %s", message)
 
+    def speak_info(self, message: str, *, key: Optional[str] = None) -> None:
+        """Queue an informational prompt without blocking perception."""
+        self.speak(message, key=key, priority="INFO")
+
+    def speak_warning(self, message: str, *, key: Optional[str] = None) -> None:
+        """Queue a corrective warning with higher priority than information."""
+        self.speak(message, key=key, priority="WARNING")
+
+    def speak_critical(self, message: str, *, key: Optional[str] = None) -> None:
+        """Queue an escalating critical prompt."""
+        self.speak(message, key=key, priority="CRITICAL")
+
     # --- hazard/safety alerts ---
 
     def speak_hazard(self, hazard_type: str, risk_level: str, object_name: str) -> None:
@@ -180,13 +192,26 @@ class VoiceAlertService:
         self.speak(f"Warning. The expected step was skipped. {expected_label}.", key="skipped", priority="WARNING")
 
     def announce_out_of_sequence(self, expected_label: str) -> None:
-        self.speak(f"Warning. Activity is out of sequence. Expected: {expected_label}.", key="out_of_sequence", priority="WARNING")
+        self.speak_warning(
+            f"Warning. Activity is out of sequence. Expected: {expected_label}.",
+            key="out_of_sequence",
+        )
+
+    def announce_recovery(self, expected_label: str, *, critical: bool = False) -> None:
+        message = f"{'Critical. ' if critical else ''}Return to {expected_label} before continuing."
+        if critical:
+            self.speak_critical(message, key="recovery_critical")
+        else:
+            self.speak_warning(message, key="recovery_warning")
 
     def announce_repeated_step(self, step_label: str) -> None:
         self.speak(f"Step repeated. {step_label}.", key="repeated")
 
     def announce_uncertain(self) -> None:
-        self.speak("Unable to confidently identify the current activity.", key="uncertain")
+        self.speak_warning(
+            "Unable to confidently identify the current activity. Please hold the pose and repeat.",
+            key="uncertain",
+        )
 
     def announce_experiment_completed(self) -> None:
         self.speak("Experiment completed successfully.", key="experiment_completed")

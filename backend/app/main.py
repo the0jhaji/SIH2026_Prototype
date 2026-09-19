@@ -324,6 +324,10 @@ def create_app(
     async def engine_status() -> dict:
         return state_engine.snapshot()
 
+    @app.get("/api/experiment/v2/voice")
+    async def engine_voice() -> dict:
+        return {"health": voice_service.health, "queue_size": voice_service.queue_size}
+
     @app.post("/api/experiment/v2/start")
     async def engine_start() -> dict:
         if state_engine.state != "NOT_STARTED" and state_engine.state in (

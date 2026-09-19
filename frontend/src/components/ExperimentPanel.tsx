@@ -55,6 +55,9 @@ export function ExperimentPanel({ snapshot, running, onStart, onStop, busy }: Pr
               {snapshot.run_id}
             </span>
           )}
+          <span className="font-mono text-[9px] uppercase tracking-wider text-on-surface-variant">
+            Voice: {snapshot.voice.health} · Q{snapshot.voice.queue_size}
+          </span>
         </div>
       </div>
 
@@ -143,6 +146,11 @@ export function ExperimentPanel({ snapshot, running, onStart, onStop, busy }: Pr
                   {v.kind.replace(/_/g, ' ')}
                 </p>
                 <p className="mt-0.5 text-xs text-on-surface-variant">{v.message}</p>
+                {v.recovery && (
+                  <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-secondary">
+                    Recovery: {v.recovery}
+                  </p>
+                )}
               </div>
             ))}
           </div>

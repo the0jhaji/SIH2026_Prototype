@@ -262,6 +262,13 @@ def test_out_of_sequence_announces() -> None:
     engine._voice.announce_out_of_sequence.assert_called()  # type: ignore[union-attr]
 
 
+def test_out_of_sequence_includes_recovery_guidance() -> None:
+    engine, _, _ = _make_engine(confirm_frames=1)
+    engine.start()
+    engine.on_detection(_det("PICK_RED", 0.9))
+    engine._voice.announce_recovery.assert_called_once_with("Approach the box")  # type: ignore[union-attr]
+
+
 def test_skipped_steps_detected() -> None:
     engine, _, _ = _make_engine(confirm_frames=1)
     engine.start()

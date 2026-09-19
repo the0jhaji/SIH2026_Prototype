@@ -3,3 +3,4 @@ uvicorn[standard]
 pydantic
 opencv-python
 numpy
+pyttsx3
