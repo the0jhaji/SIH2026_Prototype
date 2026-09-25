@@ -74,6 +74,8 @@ class SafetyService:
         self._last_payload: Optional[dict] = None
         self._last_emergency: Optional[EmergencySignal] = None
         self._last_snapshot: Optional[dict] = None
+        self._dbg_hazards: dict = {}
+        self._dbg_last_state: Optional[str] = None
 
     # ----------------------------------------------------------------- events
 
@@ -178,6 +180,7 @@ class SafetyService:
         self._scene = scene
         self._last_payload = payload
         self._last_emergency = emergency
+        self._dbg_step(scene, payload)
 
         events: List[dict] = []
         for ev in self.monitor.update(scene, emergency, now):
@@ -215,6 +218,36 @@ class SafetyService:
         for ev in events + alert_events + incident_events:
             await self._broadcast(ev)
         await self._publish_snapshot()
+
+    def _dbg_step(self, scene: SceneAssessment, payload: dict) -> None:
+        """One detection-debug line per safety tick (payload dict, not the
+        detection service, so stub detection objects in tests work)."""
+        try:
+            from ai.detection import detect_log
+        except Exception:  # noqa: BLE001 - debug logging is best-effort
+            return
+        detect_log.ensure_setup()
+        for a in scene.assessments:
+            sig = (a.risk_level, bool(a.confirmed), bool(a.near_astronaut))
+            if self._dbg_hazards.get(a.object) == sig:
+                continue
+            self._dbg_hazards[a.object] = sig
+            detect_log.dbg_info(
+                "HAZARD",
+                f"object={a.object} hazard={a.hazard_type or 'object'} risk={a.risk_level} "
+                f"score={a.risk_score:.0%} confirmed={a.confirmed} near={a.near_astronaut}",
+            )
+        detect_log.dbg_info(
+            "SAFETY",
+            f"state=overall={scene.overall_risk_level} astronaut_in_view={scene.astronaut_in_view} "
+            f"hazards=({sum(1 for a in scene.hazards if a.risk_level != 'SAFE')}, {len(scene.hazards)}) "
+            f"unclassified={len(scene.unclassified)} stale={bool(scene.stale)} "
+            f"detection_enabled={payload.get('enabled', True)}",
+        )
+        new_state = self.monitor.state
+        if new_state != self._dbg_last_state:
+            self._dbg_last_state = new_state
+            detect_log.dbg_info("STATE_CHANGE", f"[safety] mission_state={new_state}")
 
     def _ev_kwargs(self, ev: dict) -> dict:
         extra = {k: v for k, v in ev.items() if k not in {"ts"}}

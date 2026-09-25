@@ -23,6 +23,7 @@ from typing import Optional, Sequence
 import cv2
 import numpy as np
 
+from . import detect_log
 from .detector import BaseDetector
 from .types import Detection, DetectorStatus
 
@@ -77,7 +78,12 @@ class YoloDetector(BaseDetector):
         if self.is_loaded:
             return
         resolved = resolve_weights_path(self.model_path)
+        detect_log.ensure_setup()
         if not resolved.exists():
+            detect_log.dbg_error(
+                "MODEL",
+                f"weights_missing path={resolved} exists=false cannot_load=FileNotFoundError",
+            )
             raise FileNotFoundError(
                 f"YOLO model weights not found: {resolved}. Export a trained model "
                 f"to ONNX and place it in models/detection/ (see models/detection/README.md), "
@@ -87,7 +93,11 @@ class YoloDetector(BaseDetector):
         names = _read_names_file(names_path)
         if names:
             self.classes = names
-        net = cv2.dnn.readNetFromONNX(str(resolved))
+        try:
+            net = cv2.dnn.readNetFromONNX(str(resolved))
+        except cv2.error as exc:
+            detect_log.dbg_error("MODEL", f"readNetFromONNX_failed path={resolved} err={exc}")
+            raise
         if self.cv_threads and self.cv_threads > 0:
             cv2.setNumThreads(self.cv_threads)
         else:
@@ -101,6 +111,12 @@ class YoloDetector(BaseDetector):
         self._net = net
         self._weights = resolved
         self._error = None
+        detect_log.dbg_info(
+            "MODEL",
+            f"loaded path={resolved} exists=true size_mb={resolved.stat().st_size / 1e6:.1f} "
+            f"classes={len(self.classes)} input_size={self.input_size} device=cpu "
+            f"conf={self.conf_threshold} iou={self.iou_threshold}",
+        )
 
     def detect(self, frame: np.ndarray, timestamp_ms: Optional[int] = None) -> list[Detection]:
         if self._net is None:

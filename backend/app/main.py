@@ -151,6 +151,8 @@ def create_app(
             enabled=config.DETECTION_ENABLED or detector is not None,
             kind=config.DETECTION_BACKEND,
             model_path=config.DETECTION_MODEL_PATH,
+            general_model_path=config.DETECTION_GENERAL_MODEL_PATH,
+            custom_model_path=config.DETECTION_CUSTOM_MODEL_PATH,
             conf_threshold=config.DETECTION_CONF_THRESHOLD,
             poll_ms=config.DETECTION_POLL_MS,
             scene=config.MOCK_SCENE or None,

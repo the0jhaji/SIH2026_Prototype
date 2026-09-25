@@ -18,6 +18,10 @@ import numpy as np
 
 from .base import BaseDetector
 from .detections import Box, ObjectDetection
+try:
+    from ..detection import detect_log
+except ImportError:  # ai venv imports `pipeline` as a top-level package
+    from detection import detect_log
 
 #: Astra AI scene classes, index-aligned with a 5-class YOLO model.
 DEFAULT_CLASSES = ["person", "experiment_box", "red_box", "yellow_box", "target_area"]
@@ -98,6 +102,52 @@ def postprocess_yolov8(
     class_scores = arr[:, 4:]
     scores = class_scores.max(axis=1)
     class_ids = class_scores.argmax(axis=1)
+
+    # ---- [DETECT][RAW/FILTER/CLASS/CLASS_MAP] observability ----------------
+    # Logs network candidates above a logging floor (0.02) BEFORE the config
+    # confidence filter, so a detection that YOLO sees but the threshold drops
+    # is never hidden. Purely observational: `keep` and the return value are
+    # untouched. `dbg()` lines go only to logs/detection_debug.log; rejection
+    # events are echoed to the console too.
+    inv_scale = 1.0 / scale if scale != 0 else 1.0
+    offset_x = dx * inv_scale
+    offset_y = dy * inv_scale
+    _cand = np.where(scores >= 0.02)[0][:300]
+    for ci in np.atleast_1d(_cand):
+        c = int(ci)
+        cid = int(class_ids[c])
+        s = float(scores[c])
+        cx = float(arr[c, 0]) * input_size * inv_scale
+        cy = float(arr[c, 1]) * input_size * inv_scale
+        hw = float(arr[c, 2]) * input_size * 0.5 * inv_scale
+        hh = float(arr[c, 3]) * input_size * 0.5 * inv_scale
+        bx1 = int(np.clip(round(cx - hw - offset_x), 0, frame_width))
+        by1 = int(np.clip(round(cy - hh - offset_y), 0, frame_height))
+        bx2 = int(np.clip(round(cx + hw - offset_x), 0, frame_width))
+        by2 = int(np.clip(round(cy + hh - offset_y), 0, frame_height))
+        if cid >= num_classes:
+            detect_log.dbg("CLASS", f"class_id={cid} class_name=unknown conf={s:.2f} bbox=({bx1},{by1},{bx2},{by2})")
+            detect_log.dbg("CLASS_MAP", f"source={cid} mapped_to=None(dropped, outside class range {num_classes})")
+            detect_log.bump("unknown")
+            continue
+        name = classes[cid]
+        detect_log.dbg(
+            "RAW",
+            f"class_id={cid} class={name} conf={s:.2f} bbox=({bx1},{by1},{bx2},{by2}) "
+            f"center=({(bx1 + bx2) // 2},{(by1 + by2) // 2}) w={bx2 - bx1} h={by2 - by1}",
+        )
+        detect_log.bump("raw")
+        if s < conf_threshold:
+            detect_log.dbg_info(
+                "FILTER", f"reason=confidence class={name} conf={s:.2f} threshold={conf_threshold:.2f}"
+            )
+            detect_log.bump("rejected_confidence")
+        else:
+            detect_log.dbg("FILTER", f"ACCEPT class={name} conf={s:.2f}")
+            detect_log.bump("accepted")
+    if len(_cand) >= 300:
+        detect_log.dbg("RAW", f"raw_truncated=true (first 300 of {len(scores)} candidates logged)")
+
     keep = scores >= conf_threshold
     keep &= class_ids < num_classes
     if not keep.any():
@@ -114,10 +164,10 @@ def postprocess_yolov8(
     half_h = rows[:, 3] * input_size * 0.5 * inv_scale
     cx = rows[:, 0] * input_size * inv_scale
     cy = rows[:, 1] * input_size * inv_scale
-    x1 = cx - half_w + offset_x
-    y1 = cy - half_h + offset_y
-    x2 = cx + half_w + offset_x
-    y2 = cy + half_h + offset_y
+    x1 = cx - half_w - offset_x
+    y1 = cy - half_h - offset_y
+    x2 = cx + half_w - offset_x
+    y2 = cy + half_h - offset_y
     x1 = np.clip(np.round(x1), 0, frame_width).astype(np.int32)
     y1 = np.clip(np.round(y1), 0, frame_height).astype(np.int32)
     x2 = np.clip(np.round(x2), 0, frame_width).astype(np.int32)
@@ -140,7 +190,13 @@ def postprocess_yolov8(
         score_list = [s for _, s in items]
         indices = cv2.dnn.NMSBoxes(box_tuples, score_list, conf_threshold, iou_threshold)
         if indices is None or len(indices) == 0:
+            suppress = len(items)
+            if suppress:
+                detect_log.dbg("NMS", f"class={label} suppressed={suppress} (all overlapping duplicates)")
             continue
+        suppress = len(items) - len(indices)
+        if suppress:
+            detect_log.dbg("NMS", f"class={label} suppressed={suppress} (overlapping duplicates)")
         for i in np.atleast_1d(indices):
             orig_idx = items[int(i)][0]
             selected.append((orig_idx, float(scores_v[orig_idx]), label))

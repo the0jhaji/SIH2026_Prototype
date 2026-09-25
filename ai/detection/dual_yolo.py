@@ -14,6 +14,7 @@ from typing import Optional
 
 import numpy as np
 
+from . import detect_log
 from .detector import BaseDetector
 from .types import Detection, DetectorStatus
 from .yolo_detector import YoloDetector
@@ -75,18 +76,31 @@ class DualYoloDetector(BaseDetector):
         if not self._loaded:
             self.load()
         ts = self._ts(timestamp_ms)
+        detect_log.ensure_setup()
         try:
             general_dets = self._general.detect(frame, ts)
         except Exception as exc:
+            detect_log.dbg_error("MODEL", f"general_{self._general.model_path} err={exc}")
             logger.warning("General model error: %s", exc)
             general_dets = []
         try:
             custom_dets = self._custom.detect(frame, ts)
         except Exception as exc:
+            detect_log.dbg_error("MODEL", f"custom_{self._custom.model_path} err={exc}")
             logger.warning("Custom model error: %s", exc)
             custom_dets = []
+        detect_log.dbg_info(
+            "YOLO",
+            f"raw_general={len(general_dets)} raw_custom={len(custom_dets)}",
+        )
         merged = general_dets + custom_dets
-        return self._nms(merged)
+        out = self._nms(merged)
+        suppress = len(merged) - len(out)
+        if suppress:
+            detect_log.dbg(
+                "MERGE", f"input={len(merged)} output={len(out)} suppressed={suppress} (cross-model NMS)"
+            )
+        return out
 
     def _nms(self, detections: list[Detection]) -> list[Detection]:
         """Suppress overlapping boxes across both models."""

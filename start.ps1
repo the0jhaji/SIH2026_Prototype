@@ -2,14 +2,15 @@
 # Opens a terminal in the project root and run:  .\start.ps1
 #
 # Starts (in separate, independent PowerShell processes):
-#   * FastAPI backend   -> http://127.0.0.1:8000  (heuristic color+motion detection)
+#   * FastAPI backend   -> http://127.0.0.1:8000  (dual YOLO object detection)
 #   * React/Vite frontend-> http://127.0.0.1:5173 (proxies /api & /ws to :8000)
 #
-# Detection uses the model-free heuristic detector (HSV color + motion) which
-# detects person (motion), red_box (red blobs), and yellow_box (yellow blobs)
-# from the real webcam without any trained model.  Activity perception
-# (ACTIVITY_BACKEND=live) advances the experiment only when the required
-# objects are visibly present on camera.
+# Detection runs the general COCO ONNX and the custom experiment ONNX, merging
+# them with cross-model NMS. Override the two independent slots with
+# DETECTION_GENERAL_MODEL_PATH and DETECTION_CUSTOM_MODEL_PATH (paths are
+# relative to models/ unless absolute). Activity perception (ACTIVITY_BACKEND=
+# live) advances the experiment only when the required objects are visibly
+# present on camera.
 #
 # Shutdown: press Ctrl+C in this window (or close it) and the child backend/
 # frontend processes are terminated so nothing is left running.
@@ -131,10 +132,10 @@ Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
 try {
     # ---------------------------------------------------------------- backend
     Write-Step "Starting FastAPI backend on port $BackendPort (detection: yolo)..."
-    # Env for heuristic object detection + camera-grounded activity perception.
+    # Env for dual ONNX detection + camera-grounded activity perception.
     #   CAMERA_MOCK=false  → use real webcam (or set CAMERA_INDEX/CAMERA_WIDTH/CAMERA_HEIGHT)
     #   DETECTION_ENABLED=true  → enable detection
-    #   DETECTION_BACKEND=heuristic  → model-free HSV color + motion detection (no weights needed)
+    #   DETECTION_BACKEND=dual  → general + custom ONNX, cross-model NMS
     #   ACTIVITY_BACKEND=live  → camera-grounded perception (default)
     $env:CAMERA_MOCK = 'false'
     $env:DETECTION_ENABLED = 'true'

@@ -18,6 +18,15 @@ The default model path (override anytime with `DETECTION_MODEL_PATH`) is:
 - any absolute path, or
 - `$BAS_MODELS_DIR/detection/yolov8n.onnx` if that directory is set.
 
+`DETECTION_BACKEND=dual` runs two independently configurable models and merges
+them with cross-model NMS:
+
+- `DETECTION_GENERAL_MODEL_PATH` (default `detection/yolov8n.onnx`)
+- `DETECTION_CUSTOM_MODEL_PATH` (default `detection/experiment_custom.onnx`)
+
+`DETECTION_MODEL_PATH` remains the single-model setting for
+`DETECTION_BACKEND=yolo`; it is intentionally not reused for both dual slots.
+
 ## Class names
 
 Class names are picked up (index-aligned, one per line) from the `.names`
@@ -72,8 +81,8 @@ model. Everything is local — nothing is downloaded or uploaded.
 
 # 2. Export a validated ultralytics data.yaml from the split:
 .\\.venv\\Scripts\\python.exe dataset\\scripts\\export_training.py --root dataset
-#    -> dataset/training/data.yaml  (fails with exit 2 on missing labels or
-#       cross-split session leakage; never splits a session across sets)
+#    -> dataset/training/data.yaml  (fails with exit 2 on missing labels,
+#       cross-split session/exact-image leakage, or an unverifiable flat split)
 
 # 3. Train + export (dedicated venv, this file's neighbour keeps the core venv lean):
 python -m venv .venv-train

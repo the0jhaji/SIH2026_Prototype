@@ -86,6 +86,11 @@ its own daemon thread and exposes `GET /api/detection/status` +
   detector daemon thread gets a priority bump (Best-effort, never fatal).
 - YoloDetector reuses `ai/pipeline/yolo.py` helpers (letterbox, postprocess,
   `resolve_weights_path`); a `.names` file next to the ONNX overrides classes.
+- `DETECTION_BACKEND=dual` runs two independently configurable models
+  (`DETECTION_GENERAL_MODEL_PATH`, `DETECTION_CUSTOM_MODEL_PATH`) and merges
+  them with cross-model NMS. `DETECTION_MODEL_PATH` stays the single-model
+  setting for `DETECTION_BACKEND=yolo`; never silently reuse it for both dual
+  slots.
 - The DetectionService thread calls only `camera_manager.latest_capture()`
   (frames identified by frame id) — never locked methods, never the MJPEG
   generator; it must keep working when the camera is stopped (idle).
@@ -208,8 +213,10 @@ normalized 0–1), and never touches the originals. Rules:
   tests. Never re-implement it.
 - **Split is by recording *session*** (an image's directory under `raw/`), so
   one session can never appear in more than one of train/val/test (default
-  70/20/10, `--seed`). The split CLI/validator stay consistent with
-  `annotator.make_split` / `find_session_leakage`.
+  70/20/10, `--seed`). Exact duplicate images shared across splits are errors;
+  flat layouts are warnings in the validator and rejected by the training
+  export. The split CLI/validator stay consistent with
+  `annotator.make_split` / `find_session_leakage` / `find_duplicate_images`.
 - Annotations with no boxes (blank label) are valid (negative/background
   frames); a **missing** label file for a split image is an error.
 - Commands (backend venv, repo root): annotate
@@ -224,12 +231,20 @@ the validated split into an ultralytics `data.yaml`; `install_detection_model.py
 installs a trained ONNX + `.names` for the runtime. Rules:
 
 - `make_data_yaml` reuses `annotator.validate_dataset` (missing labels are
-  errors, blank labels fine, class-id range, session leakage) and requires
-  non-empty train+val; `test` is omitted when empty. Raises `ValueError` (CLI
-  exits 2) on anything untrainable.
+  errors, blank labels fine, class-id range, session leakage, exact cross-split
+  duplicates) and requires provable recording-session directories plus non-empty
+  train+val; `test` is omitted when empty. Raises `ValueError` (CLI exits 2) on
+  anything untrainable.
 - Ultralytics is **optional and never imported at runtime**
   (`dataset/requirements-train.txt`). The backend reads the exported ONNX via
   OpenCV DNN only.
+- Current measured state of the detector and the training data (read before
+  proposing a fine-tune or promoting a model): `docs/YOLO_FINE_TUNING_AUDIT.md`
+  (stack + defects), `docs/YOLO_DATASET_REPORT.md` (class coverage, duplicates,
+  leakage), `docs/YOLO_FINE_TUNING_RESULTS.md` (evaluation numbers, readiness
+  gate). Known blockers: `yellow_box` has zero boxes, `experiment_train` is a
+  frame-level split of one clip with no test split, and a generic YOLO does not
+  learn the ASTRA classes.
 - The `.names` file written next to the ONNX (from `classes.json`,
   index-aligned) is the trained-class contract with
   `ai/detection/yolo_detector.py` — never hand-edit a class list in code.

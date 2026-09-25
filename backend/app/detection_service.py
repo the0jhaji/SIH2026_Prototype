@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Optional
 
 from .detection_tracker import TemporalTracker
+from ai.detection import detect_log
 
 logger = logging.getLogger("astraai.detection")
 
@@ -44,6 +45,8 @@ class DetectionService:
         enabled: bool = False,
         kind: str = "mock",
         model_path: str | None = None,
+        general_model_path: str | None = None,
+        custom_model_path: str | None = None,
         conf_threshold: float = 0.5,
         poll_ms: int = 100,
         scene: str | None = None,
@@ -62,6 +65,8 @@ class DetectionService:
         self._enabled = enabled and (detector is not None or kind in {"mock", "yolo", "dual", "heuristic"})
         self._kind = kind
         self._model_path = model_path
+        self._general_model_path = general_model_path
+        self._custom_model_path = custom_model_path
         self._conf_threshold = conf_threshold
         self._poll_ms = max(10, poll_ms)
         self._scene = scene
@@ -81,6 +86,8 @@ class DetectionService:
         self._raw_unknown_detections: list[dict] = []
         self._frame_size: tuple[int, int] | None = None
         self._last_error: Optional[str] = None
+        self._dbg_last_summary = time.perf_counter()
+        self._dbg_last_state: tuple[int, int] | None = None
         if self._enabled:
             self._bootstrap()
 
@@ -96,6 +103,8 @@ class DetectionService:
                 self._detector = create_detector(
                     self._kind,
                     model_path=self._model_path,
+                    general_model_path=self._general_model_path,
+                    custom_model_path=self._custom_model_path,
                     conf_threshold=self._conf_threshold,
                     scene=self._scene,
                     cv_threads=self._cv_threads,
@@ -175,6 +184,7 @@ class DetectionService:
             try:
                 last_id = self._infer_once(last_id)
             except Exception as exc:  # noqa: BLE001 - keep the loop resilient
+                detect_log.dbg_error("FAIL", f"inference_error={exc}")
                 logger.exception("Detection inference failed")
                 with self._lock:
                     self._last_error = f"Detection failed: {exc}"
@@ -190,6 +200,13 @@ class DetectionService:
             return last_id
         frame_id, frame = cap
         started = time.perf_counter()
+        detect_log.ensure_setup()
+        cam = self._camera_status()
+        detect_log.dbg(
+            "FRAME",
+            f"id={frame_id} size={frame.shape[1]}x{frame.shape[0]} "
+            f"fps={cam.get('fps', '?')} camera={cam.get('status', '?')}",
+        )
         raw = self._detector.detect(frame)
         unknown_raw: list[Detection] = []
         if self._generic is not None:
@@ -198,12 +215,38 @@ class DetectionService:
             # overlap a known-class detection; suppressing here keeps the
             # unknown feed honest (a person is never also "unknown_object").
             for proposal in proposals:
-                if not self._overlaps_known(proposal, raw):
-                    unknown_raw.append(proposal)
+                if self._overlaps_known(proposal, raw):
+                    detect_log.dbg_info(
+                        "UNKNOWN",
+                        f"suppressed label=unknown_object conf={proposal.confidence:.2f} (overlaps known)",
+                    )
+                    continue
+                unknown_raw.append(proposal)
+                detect_log.bump("unknown")
+                detect_log.dbg(
+                    "CLASS_MAP",
+                    f"source=generic_motion mapped_to=unknown_object conf={proposal.confidence:.2f}",
+                )
+                detect_log.dbg_info(
+                    "UNKNOWN", f"accepted label=unknown_object conf={proposal.confidence:.2f}"
+                )
         stable = self._tracker.update(raw + unknown_raw)
         known_stable = [d for d in stable if d.class_name != "unknown_object"]
         unknown_stable = [d for d in stable if d.class_name == "unknown_object"]
         elapsed_ms = int((time.perf_counter() - started) * 1000)
+        detect_log.dbg_info(
+            "YOLO",
+            f"inference_ms={elapsed_ms} raw_known={len(raw)} raw_unknown={len(unknown_raw)}",
+        )
+        per_class = {
+            d.class_name: round(d.confidence, 2)
+            for d in known_stable
+        }
+        detect_log.dbg_info(
+            "FINAL",
+            f"stable_known={len(known_stable)} stable_unknown={len(unknown_stable)} "
+            f"detail={(', '.join(f'{k}={v}' for k, v in sorted(per_class.items())) or 'none')}",
+        )
         with self._lock:
             self._last_error = None
             self._last_inference_ms = _now_ms()
@@ -213,7 +256,41 @@ class DetectionService:
             self._raw_unknown_detections = [d.to_dict() for d in unknown_raw]
             self._unknown_detections = [d.to_dict() for d in unknown_stable]
             self._frame_size = (frame.shape[1], frame.shape[0])
+        self._maybe_summary()
+        self._dbg_state_change()
         return frame_id
+
+    def _camera_status(self) -> dict:
+        """Snapshot the camera info dict guarded — tests inject stub cameras."""
+        try:
+            info = self._camera.info()
+            return {"status": info.get("status"), "fps": info.get("fps")}
+        except Exception:  # noqa: BLE001 - best-effort diagnostics
+            return {}
+
+    def _maybe_summary(self) -> None:
+        """Roll a once-per-second detection summary from the stage counters."""
+        now = time.perf_counter()
+        dt = now - self._dbg_last_summary
+        if dt < 1.0:
+            return
+        self._dbg_last_summary = now
+        counters = detect_log.take_counters()
+        detect_log.dbg_info(
+            "SUMMARY",
+            f"window_s={dt:.1f} infer_rate={1.0 / dt:.1f} fps "
+            f"raw={counters['raw']} accepted={counters['accepted']} "
+            f"rejected_confidence={counters['rejected_confidence']} unknown={counters['unknown']}",
+        )
+
+    def _dbg_state_change(self) -> None:
+        """Emit STATE_CHANGE only when the stable feed actually changes."""
+        with self._lock:
+            new = (len(self._detections), len(self._unknown_detections))
+        if new == self._dbg_last_state:
+            return
+        self._dbg_last_state = new
+        detect_log.dbg_info("STATE_CHANGE", f"known={new[0]} unknown={new[1]}")
 
     def _overlaps_known(self, proposal: Detection, known: list) -> bool:
         """Suppress a generic proposal that collides with a known detection.

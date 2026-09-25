@@ -9,14 +9,14 @@ Checks, per image/label pair:
 - the box stays inside the image
 - no label is orphaned (label without its image, image without its label)
 
-Cross-split check:
+Cross-split checks:
 
-- the same recording session never appears in more than one of train/val/test
+- a named recording session never appears in more than one of train/val/test
+- byte-identical images are not shared across splits
+- flat layouts are reported as unverifiable session isolation
 
     .\\.venv\\Scripts\\python.exe dataset\\scripts\\validate_dataset.py
     .\\.venv\\Scripts\\python.exe dataset\\scripts\\validate_dataset.py --root dataset
-
-Exit code 0 = OK, 1 = errors found. Warnings (unannotated images) are fine.
 """
 
 from __future__ import annotations
@@ -30,20 +30,44 @@ if str(DATASET_DIR) not in sys.path:
     sys.path.insert(0, str(DATASET_DIR))
 
 from annotation.annotator import load_classes, validate_dataset  # noqa: E402
+from roboflow_tool import load_roboflow_classes  # noqa: E402
+
+
+def _load_class_list(path: str | None, parser: argparse.ArgumentParser) -> list[str]:
+    if path is None:
+        return load_classes()
+    classes_path = Path(path)
+    if not classes_path.is_file():
+        parser.error(f"classes file not found: {classes_path}")
+    if classes_path.suffix.lower() in {".yaml", ".yml"}:
+        return load_roboflow_classes(classes_path)
+    return load_classes(classes_path)
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Validate the BAS dataset and its split")
-    parser.add_argument("--root", default=str(DATASET_DIR), help="dataset root (raw/, annotations/, train/, ...)")
-    parser.add_argument("--classes", default=None, help="path to classes.json")
+    parser.add_argument(
+        "--root", default=str(DATASET_DIR), help="dataset root (raw/, annotations/, train/, ...)"
+    )
+    parser.add_argument(
+        "--classes",
+        default=None,
+        help="classes.json or data.yaml; defaults to annotation/classes.json",
+    )
+    parser.add_argument(
+        "--allow-duplicates",
+        action="store_true",
+        help="report byte-identical cross-split images as warnings instead of errors",
+    )
     args = parser.parse_args(argv)
 
-    classes = load_classes(args.classes)
+    classes = _load_class_list(args.classes, parser)
     root = Path(args.root).resolve()
-    report = validate_dataset(root, classes=classes)
+    report = validate_dataset(root, classes=classes, allow_duplicates=args.allow_duplicates)
 
     print(f"Dataset: {root}")
     print(f"Classes: {classes} ({len(classes)})")
+    print(f"Split layout: {report.stats.get('layout', 'empty')}")
     raw = report.stats.get("raw")
     if raw:
         print(
@@ -54,13 +78,27 @@ def main(argv: list[str] | None = None) -> None:
     for split in ("train", "val", "test"):
         info = report.stats.get(split)
         if info:
+            histogram = info.get("histogram", [])
+            per_class = ", ".join(
+                f"{name}={histogram[i]}" if i < len(histogram) else f"{name}=?"
+                for i, name in enumerate(classes)
+            )
             print(
                 f"{split:6s} split: images={info['images']:4d}   "
-                f"labels={info['labels']:4d}   missing={info['missing_labels']:4d}"
+                f"labels={info['labels']:4d}   missing={info['missing_labels']:4d}   "
+                f"boxes/class: {per_class}"
             )
     print(f"Session leakage: {len(find_session_leakage_names(report))} session(s) span multiple splits")
     for line in find_session_leakage_names(report):
         print(f"  {line}")
+    duplicates = report.stats.get("duplicates", {})
+    print(
+        "Duplicate images: "
+        f"cross-split groups={duplicates.get('cross_split_groups', 0)}  "
+        f"within-split groups={duplicates.get('within_split_groups', 0)}"
+    )
+    for group in duplicates.get("cross_split", []):
+        print(f"  {' == '.join(group)}")
 
     if report.warnings:
         print(f"\nWarnings ({len(report.warnings)}):")

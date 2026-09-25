@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+from detection import dual_yolo
 from detection.detector import create_detector
 from detection.mock_detector import MockDetector
 from detection.types import Detection
@@ -67,6 +68,43 @@ def test_factory_builds_mock() -> None:
 def test_factory_rejects_unknown_kind() -> None:
     with pytest.raises(ValueError, match="Unknown detector kind"):
         create_detector("nope")
+
+
+def test_factory_dual_passes_independent_model_paths(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    class SpyYolo:
+        def __init__(self, **kwargs) -> None:
+            calls.append(kwargs)
+
+    monkeypatch.setattr(dual_yolo, "YoloDetector", SpyYolo)
+    create_detector(
+        "dual",
+        general_model_path="general.onnx",
+        custom_model_path="custom.onnx",
+        conf_threshold=0.4,
+        cv_threads=2,
+    )
+
+    assert [call["model_path"] for call in calls] == ["general.onnx", "custom.onnx"]
+    assert all(call["conf_threshold"] == 0.4 for call in calls)
+    assert all(call["cv_threads"] == 2 for call in calls)
+
+
+def test_factory_dual_keeps_independent_defaults(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    class SpyYolo:
+        def __init__(self, **kwargs) -> None:
+            calls.append(kwargs)
+
+    monkeypatch.setattr(dual_yolo, "YoloDetector", SpyYolo)
+    create_detector("dual", model_path="single-backend.onnx")
+
+    assert [call["model_path"] for call in calls] == [
+        "detection/yolov8n.onnx",
+        "detection/experiment_custom.onnx",
+    ]
 
 
 def test_yolo_missing_model_raises_clear_error() -> None:

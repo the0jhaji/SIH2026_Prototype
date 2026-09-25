@@ -11,6 +11,7 @@ from annotation.annotator import (
     assign_sessions,
     box_errors,
     denormalize_box,
+    find_duplicate_images,
     find_session_leakage,
     image_relpaths,
     label_rel,
@@ -22,6 +23,7 @@ from annotation.annotator import (
     rel_to_path,
     serialize_label,
     session_of,
+    split_layout,
     validate_boxes_for_save,
     validate_dataset,
     validate_label,
@@ -32,7 +34,7 @@ def make_raw_session(root: Path, session: str, frames: list[str]) -> Path:
     d = root / "raw" / "misc" / session
     d.mkdir(parents=True, exist_ok=True)
     for frame in frames:
-        (d / frame).write_bytes(b"fake-jpeg")
+        (d / frame).write_bytes(f"fake-jpeg:{session}:{frame}".encode())
     return d
 
 
@@ -41,6 +43,15 @@ def write_label(root: Path, rel: str, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
+
+
+def write_split_pair(root: Path, split: str, name: str, data: bytes, class_id: int = 0) -> None:
+    image = root / split / "images" / name
+    label = root / split / "labels" / name
+    image.parent.mkdir(parents=True, exist_ok=True)
+    label.parent.mkdir(parents=True, exist_ok=True)
+    image.write_bytes(data)
+    label.with_suffix(".txt").write_text(f"{class_id} 0.5 0.5 0.2 0.2\n", encoding="utf-8")
 
 
 # ------------------------------------------------------------ classes
@@ -197,6 +208,76 @@ def test_validate_dataset_reports_leakage(tmp_path) -> None:
     report = validate_dataset(tmp_path, classes=DEFAULT_CLASSES)
     assert not report.ok
     assert any("more than one split" in e for e in report.errors)
+
+
+def test_flat_layout_is_not_session_leakage(tmp_path) -> None:
+    write_split_pair(tmp_path, "train", "a.jpg", b"train-a")
+    write_split_pair(tmp_path, "val", "b.jpg", b"val-b")
+    report = validate_dataset(tmp_path, classes=DEFAULT_CLASSES)
+    assert find_session_leakage(tmp_path) == []
+    assert report.stats["layout"] == "flat"
+    assert report.ok, report.errors
+    assert any("flat split layout" in w for w in report.warnings)
+
+
+def test_cross_split_duplicate_image_is_rejected(tmp_path) -> None:
+    write_split_pair(tmp_path, "train", "a.jpg", b"same-image")
+    write_split_pair(tmp_path, "val", "b.jpg", b"same-image")
+    report = validate_dataset(tmp_path, classes=DEFAULT_CLASSES)
+    duplicates = find_duplicate_images(tmp_path)
+    assert not report.ok
+    assert len(duplicates) == 1 and len(duplicates[0]) == 2
+    assert any("duplicate image across splits" in e for e in report.errors)
+    assert not any("more than one split" in e for e in report.errors)
+
+
+def test_allow_duplicates_downgrades_cross_split_to_warning(tmp_path) -> None:
+    write_split_pair(tmp_path, "train", "a.jpg", b"same-image")
+    write_split_pair(tmp_path, "val", "b.jpg", b"same-image")
+    report = validate_dataset(tmp_path, classes=DEFAULT_CLASSES, allow_duplicates=True)
+    assert report.ok, report.errors
+    assert any("duplicate image across splits" in w and "(allowed)" in w for w in report.warnings)
+
+
+def test_within_split_duplicate_is_only_a_warning(tmp_path) -> None:
+    write_split_pair(tmp_path, "train", "session/a.jpg", b"same-image")
+    write_split_pair(tmp_path, "train", "session/b.jpg", b"same-image")
+    write_split_pair(tmp_path, "val", "other/c.jpg", b"other-image")
+    report = validate_dataset(tmp_path, classes=DEFAULT_CLASSES)
+    assert report.stats["duplicates"]["within_split_groups"] == 1
+    assert report.stats["duplicates"]["cross_split_groups"] == 0
+    assert report.ok, report.errors
+    assert any("duplicate image within one split" in w for w in report.warnings)
+
+
+def test_split_layout_detects_flat_session_mixed_and_empty(tmp_path) -> None:
+    assert split_layout(tmp_path) == "empty"
+    flat = tmp_path / "flat"
+    write_split_pair(flat, "train", "a.jpg", b"flat")
+    assert split_layout(flat) == "flat"
+    nested = tmp_path / "nested"
+    write_split_pair(nested, "train", "session/a.jpg", b"nested")
+    assert split_layout(nested) == "session"
+    mixed = tmp_path / "mixed"
+    write_split_pair(mixed, "train", "a.jpg", b"mixed-flat")
+    write_split_pair(mixed, "val", "session/b.jpg", b"mixed-nested")
+    assert split_layout(mixed) == "mixed"
+
+
+def test_validate_dataset_reports_class_coverage(tmp_path) -> None:
+    write_split_pair(tmp_path, "train", "session/a.jpg", b"frame", class_id=0)
+    write_split_pair(tmp_path, "val", "other/b.jpg", b"other", class_id=0)
+    report = validate_dataset(tmp_path, classes=DEFAULT_CLASSES)
+    info = report.stats["train"]
+    assert info["histogram"][0] == 1
+    assert info["classes_without_boxes"] == [i for i in range(1, len(DEFAULT_CLASSES))]
+    assert report.ok, report.errors
+
+
+def test_find_session_leakage_accepts_str_path(tmp_path) -> None:
+    for split in ("train", "val"):
+        write_split_pair(tmp_path, split, "session/frame.jpg", split.encode())
+    assert find_session_leakage(str(tmp_path)) == ["session"]
 
 
 # ------------------------------------------------------------ missing / malformed

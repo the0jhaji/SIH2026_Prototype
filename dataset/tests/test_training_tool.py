@@ -29,7 +29,7 @@ def split_dataset(tmp_path):
         (annotations / f"s{s_idx}").mkdir(parents=True, exist_ok=True)
         for i in range(1, 4):
             img = raw / f"s{s_idx}" / f"frame_{i:06d}.jpg"
-            img.write_bytes(b"\xff\xd8\xff")
+            img.write_bytes(f"\xff\xd8\xff{s_idx}:{i}".encode())
             cls = (s_idx + i) % len(classes)
             (annotations / f"s{s_idx}" / f"frame_{i:06d}.txt").write_text(
                 f"{cls} 0.5 0.5 0.2 0.2\n", encoding="utf-8"
@@ -79,6 +79,39 @@ def test_class_histogram_matches_labels(split_dataset):
     split_root, _ = split_dataset
     hist = class_histogram(split_root, len(classes_default))
     assert sum(hist["train"]) + sum(hist["val"]) == 12
+
+
+def test_make_data_yaml_reports_layout_and_zero_classes(split_dataset, tmp_path):
+    split_root, classes = split_dataset
+    summary = make_data_yaml(split_root, classes=classes, output=tmp_path / "data.yaml")
+    assert summary["layout"] == "session"
+    assert "bottle" in summary["zero_classes"]["train"]
+
+
+def test_make_data_yaml_rejects_flat_layout(tmp_path):
+    split_root = tmp_path / "split"
+    for split, name in (("train", "a.jpg"), ("val", "b.jpg")):
+        image = split_root / split / "images" / name
+        label = split_root / split / "labels" / f"{Path(name).stem}.txt"
+        image.parent.mkdir(parents=True)
+        label.parent.mkdir(parents=True)
+        image.write_bytes(split.encode())
+        label.write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="requires recording-session"):
+        make_data_yaml(split_root, classes=["person", "red_box"], output=tmp_path / "data.yaml")
+
+
+def test_make_data_yaml_rejects_cross_split_duplicate(tmp_path):
+    split_root = tmp_path / "split"
+    for split, session in (("train", "a"), ("val", "b")):
+        image = split_root / split / "images" / session / "frame.jpg"
+        label = split_root / split / "labels" / session / "frame.txt"
+        image.parent.mkdir(parents=True)
+        label.parent.mkdir(parents=True)
+        image.write_bytes(b"identical")
+        label.write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="duplicate image across splits"):
+        make_data_yaml(split_root, classes=["person", "red_box"], output=tmp_path / "data.yaml")
 
 
 def test_make_data_yaml_rejects_missing_label(split_dataset, tmp_path):

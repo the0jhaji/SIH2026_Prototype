@@ -1,8 +1,9 @@
 """Export the annotated split as a YOLO ``data.yaml`` for training (Phase 4C).
 
 Validates the session-aware split built by ``prepare_split.py`` (labels
-present, class ids in range, no session leakage) and writes a ``data.yaml``
-the ultralytics trainer consumes directly.
+present, class ids in range, no session or exact-image leakage, provable
+recording-session directories) and writes a ``data.yaml`` the ultralytics
+trainer consumes directly.
 
     .\\.venv\\Scripts\\python.exe dataset\\scripts\\export_training.py --root dataset
     # -> dataset/training/data.yaml
@@ -52,6 +53,7 @@ def main(argv: list[str] | None = None) -> None:
 
     print(f"data.yaml written: {summary['yaml']}")
     print(f"classes: {', '.join(summary['classes'])} ({len(summary['classes'])})")
+    print(f"split layout: {summary['layout']}")
     for split in ("train", "val", "test"):
         count = summary["images"].get(split, 0)
         if count:
@@ -59,6 +61,9 @@ def main(argv: list[str] | None = None) -> None:
                 f"{name}={summary['histogram'][split][i]}" for i, name in enumerate(summary["classes"])
             )
             print(f"  {split:5s} images={count:4d}  boxes/class: {per_class}")
+    for split, names in summary["zero_classes"].items():
+        if names and summary["images"].get(split):
+            print(f"  WARNING: {split} has 0 boxes for: {', '.join(names)}")
 
     print(
         "\nNext steps (train on the machine that runs ultralytics; see "

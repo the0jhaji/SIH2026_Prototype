@@ -30,8 +30,9 @@ def make_data_yaml(
     """Validate the split and write ``data.yaml`` for ultralytics training.
 
     Fails loudly on anything that would poison training: missing label files
-    (blank labels are fine), out-of-range class ids, malformed boxes, and
-    cross-split session leakage. Train and val must both have images; test is
+    (blank labels are fine), out-of-range class ids, malformed boxes,
+    byte-identical images shared across splits, or a flat split with no
+    recording-session directories. Train and val must both have images; test is
     optional.
 
     The YAML is location-independent: ``path`` is the absolute split root and
@@ -53,6 +54,12 @@ def make_data_yaml(
         info = report.stats.get(required)
         if not info or not info.get("images"):
             raise ValueError(f"split has no '{required}' images under {split_root}")
+    layout = report.stats.get("layout", "empty")
+    if layout in {"flat", "mixed"}:
+        raise ValueError(
+            f"split layout is {layout!r}: training export requires recording-session "
+            "directories under each split so session isolation is provable"
+        )
 
     yaml_path = Path(output) if output is not None else split_root / TRAINING_DIR_NAME / DATA_YAML_NAME
     yaml_path = yaml_path.resolve()
@@ -76,10 +83,18 @@ def make_data_yaml(
     return {
         "yaml": str(yaml_path),
         "classes": list(classes),
+        "layout": layout,
         "images": {
             split: report.stats[split]["images"] for split in SPLITS if split in report.stats
         },
         "histogram": class_histogram(split_root, len(classes)),
+        "zero_classes": {
+            split: [
+                classes[i] for i in report.stats[split].get("classes_without_boxes", [])
+            ]
+            for split in SPLITS
+            if split in report.stats
+        },
     }
 
 

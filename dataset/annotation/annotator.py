@@ -15,6 +15,7 @@ No web framework, no OpenCV, no production-code imports. Local only.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 import shutil
@@ -292,8 +293,34 @@ def make_split(
     return summary
 
 
+def split_layout(root: Path) -> str:
+    """Return ``session``, ``flat``, ``mixed`` or ``empty`` for a prepared split."""
+    root = Path(root)
+    flat = False
+    nested = False
+    for split in SPLITS:
+        images_dir = root / split / "images"
+        if not images_dir.is_dir():
+            continue
+        for p in images_dir.rglob("*"):
+            if not p.is_file() or p.suffix.lower() not in IMAGE_EXTS:
+                continue
+            if p.parent == images_dir:
+                flat = True
+            else:
+                nested = True
+    if flat and nested:
+        return "mixed"
+    if nested:
+        return "session"
+    if flat:
+        return "flat"
+    return "empty"
+
+
 def find_session_leakage(root: Path) -> list[str]:
-    """Sessions that appear in more than one of train/val/test."""
+    """Named recording sessions that appear in more than one of train/val/test."""
+    root = Path(root)
     seen: dict[str, set[str]] = {}
     for split in SPLITS:
         images_dir = root / split / "images"
@@ -303,8 +330,35 @@ def find_session_leakage(root: Path) -> list[str]:
             if not p.is_file() or p.suffix.lower() not in IMAGE_EXTS:
                 continue
             session = p.relative_to(images_dir).parent.as_posix()
+            if session == ".":
+                continue
             seen.setdefault(session, set()).add(split)
     return sorted(session for session, splits in seen.items() if len(splits) > 1)
+
+
+def _file_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def find_duplicate_images(root: Path) -> list[list[str]]:
+    """Byte-identical image groups in a prepared split, as root-relative paths."""
+    root = Path(root)
+    by_digest: dict[str, list[str]] = {}
+    for split in SPLITS:
+        images_dir = root / split / "images"
+        if not images_dir.is_dir():
+            continue
+        for p in images_dir.rglob("*"):
+            if not p.is_file() or p.suffix.lower() not in IMAGE_EXTS:
+                continue
+            rel = p.relative_to(root).as_posix()
+            by_digest.setdefault(_file_digest(p), []).append(rel)
+    groups = [sorted(paths) for paths in by_digest.values() if len(paths) > 1]
+    return sorted(groups, key=lambda group: group[0])
 
 
 # ------------------------------------------------------- dataset validation
@@ -338,6 +392,7 @@ def _check_labels_dir(
     stats_for = stats.setdefault(prefix, {})
     stats_for["images"] = len(images)
     missing_labels = 0
+    histogram = [0] * len(classes)
     for img in images:
         rel = img.relative_to(images_root)
         if not img.is_file():
@@ -348,11 +403,16 @@ def _check_labels_dir(
             missing_labels += 1
             errors.append(f"{prefix}: missing label for image {rel.as_posix()}")
             continue
-        _, errs = validate_label(label.read_text(encoding="utf-8"), classes)
+        boxes, errs = validate_label(label.read_text(encoding="utf-8"), classes)
         if errs:
             errors.append(f"{prefix}: {rel.as_posix()}: {'; '.join(errs)}")
+        else:
+            for box in boxes:
+                histogram[box.class_id] += 1
     stats_for["labels"] = len(images) - missing_labels
     stats_for["missing_labels"] = missing_labels
+    stats_for["histogram"] = histogram
+    stats_for["classes_without_boxes"] = [i for i, count in enumerate(histogram) if count == 0]
     seen = _stems_by_dir(images_root)
     for label in labels_root.rglob("*.txt"):
         lrel = label.relative_to(labels_root)
@@ -361,32 +421,44 @@ def _check_labels_dir(
 
 
 def validate_dataset(
-    root: Path, classes: list[str] | None = None, annotations_root: Path | None = None
+    root: Path,
+    classes: list[str] | None = None,
+    annotations_root: Path | None = None,
+    *,
+    allow_duplicates: bool = False,
 ) -> ValidationReport:
-    """Validate raw + annotations pairing, the split output, and session leakage."""
+    """Validate raw + annotations pairing, a prepared split, and split leakage."""
+    root = Path(root)
     if classes is None:
         classes = load_classes()
     if annotations_root is None:
         annotations_root = root / "annotations"
     errors: list[str] = []
     warnings: list[str] = []
-    stats: dict = {"classes": len(classes)}
+    stats: dict = {"classes": len(classes), "class_names": list(classes)}
 
     raw_root = root / "raw"
     if raw_root.is_dir():
         rels = image_relpaths(raw_root)
-        stats["raw"] = {"images": len(rels)}
+        histogram = [0] * len(classes)
+        stats["raw"] = {"images": len(rels), "annotated": 0, "histogram": histogram}
         annotated = 0
         for rel in rels:
             label = rel_to_path(annotations_root, label_rel(rel))
             if label.is_file():
                 annotated += 1
-                _, errs = validate_label(label.read_text(encoding="utf-8"), classes)
+                boxes, errs = validate_label(label.read_text(encoding="utf-8"), classes)
                 for err in errs:
                     errors.append(f"{rel}: {err}")
+                if not errs:
+                    for box in boxes:
+                        histogram[box.class_id] += 1
             else:
                 warnings.append(f"not annotated yet: {rel}")
         stats["raw"]["annotated"] = annotated
+        stats["raw"]["classes_without_boxes"] = [
+            i for i, count in enumerate(histogram) if count == 0
+        ]
     if annotations_root.is_dir():
         seen = _stems_by_dir(raw_root)
         for label in annotations_root.rglob("*.txt"):
@@ -400,8 +472,43 @@ def validate_dataset(
         if images_dir.is_dir():
             _check_labels_dir(images_dir, labels_dir, classes, split, errors, stats)
 
+    layout = split_layout(root)
+    stats["layout"] = layout
+    split_images = sum(int(report.get("images", 0)) for split, report in stats.items() if split in SPLITS)
+    if layout == "flat" and split_images:
+        warnings.append(
+            "flat split layout: no recording-session directories, "
+            f"session isolation cannot be verified ({split_images} images)"
+        )
+    elif layout == "mixed" and split_images:
+        warnings.append(
+            "mixed split layout: some images have no recording-session directory, "
+            f"session isolation is only partially verifiable ({split_images} images)"
+        )
+
     for session in find_session_leakage(root):
         errors.append(f"session {session!r} appears in more than one split (leakage)")
+
+    cross_split: list[list[str]] = []
+    within_split = 0
+    for group in find_duplicate_images(root):
+        splits = {PurePosixPath(path).parts[0] for path in group}
+        line = " == ".join(group)
+        if len(splits) > 1:
+            cross_split.append(group)
+            message = f"duplicate image across splits: {line}"
+            if allow_duplicates:
+                warnings.append(f"{message} (allowed)")
+            else:
+                errors.append(message)
+        else:
+            within_split += 1
+            warnings.append(f"duplicate image within one split: {line}")
+    stats["duplicates"] = {
+        "cross_split_groups": len(cross_split),
+        "within_split_groups": within_split,
+        "cross_split": cross_split,
+    }
 
     stats["errors"] = len(errors)
     stats["warnings"] = len(warnings)

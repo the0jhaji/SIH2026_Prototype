@@ -59,6 +59,9 @@ def create_detector(
     use_cuda: bool = False,
     scene: str | None = None,
     cv_threads: int | None = None,
+    *,
+    general_model_path: str | None = None,
+    custom_model_path: str | None = None,
 ) -> BaseDetector:
     """Build a detector instance by short name.
 
@@ -68,7 +71,9 @@ def create_detector(
     - ``yolo`` — YOLOv8 ONNX via OpenCV DNN (weights in ``models/detection/``).
       ``cv_threads`` caps the OpenCV thread pool for the net (None = auto).
     - ``dual`` — dual YOLO: COCO-80 general + custom experiment model,
-      merged with cross-model NMS.  Best for live experiment detection.
+      merged with cross-model NMS. Best for live experiment detection.
+      ``general_model_path`` and ``custom_model_path`` override the two
+      independent model slots; ``model_path`` is ignored.
     - ``heuristic`` — real, model-free HSV color + motion detection (dev/test
       only — produces false positives on non-box colored objects).
     """
@@ -89,10 +94,16 @@ def create_detector(
     if kind == "dual":
         from .dual_yolo import DualYoloDetector
 
+        dual_options = {}
+        if general_model_path:
+            dual_options["general_path"] = general_model_path
+        if custom_model_path:
+            dual_options["custom_path"] = custom_model_path
         return DualYoloDetector(
             conf_threshold=conf_threshold,
             use_cuda=use_cuda,
             cv_threads=cv_threads,
+            **dual_options,
         )
     if kind == "heuristic":
         return ColorMotionDetector(conf_threshold=conf_threshold)

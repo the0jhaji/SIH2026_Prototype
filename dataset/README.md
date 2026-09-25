@@ -151,10 +151,19 @@ dataset/split_manifest.json   # seed + session → split
 
 Checks: image + label files exist, labels are well-formed YOLO with valid
 class ids, coordinates in [0,1], positive width/height, boxes inside the
-frame, no orphaned labels — and **session leakage** (one session across
-multiple splits). Prints a summary; exit code `0` = clean, `1` = errors.
-Splits with images that have no label file are reported as errors (blank
-labels are fine for intentionally empty frames).
+frame, no orphaned labels, and **no byte-identical image shared across
+splits**. It also detects recording-session leakage and reports per-split class
+coverage. Exit code `0` = clean, `1` = errors. Splits with images that have no
+label file are errors (blank labels are fine for intentionally empty frames).
+
+A flat split (images directly under `*/images`) cannot prove recording-session
+isolation, so it is reported as a warning. Validate such third-party exports
+with their own vocabulary and explicitly allow known source duplicates:
+
+```powershell
+.\\.venv\\Scripts\\python.exe dataset\\scripts\\validate_dataset.py `
+    --root dataset\roboflow\split --classes dataset\roboflow\split\data.yaml --allow-duplicates
+```
 
 ## Training export (Phase 4C)
 
@@ -168,7 +177,8 @@ as the trainer expects.
 .\\.venv\\Scripts\\python.exe dataset\\scripts\\export_training.py --root dataset
 #    -> dataset/training/data.yaml
 #    Exit 2 = not trainable yet: missing label files, out-of-range class ids,
-#    malformed boxes, or a session spanning more than one split.
+#    malformed boxes, a session spanning multiple splits, byte-identical images
+#    across splits, or a flat layout with no recording-session directories.
 ```
 
 The generated `data.yaml` points `path` at the dataset root and

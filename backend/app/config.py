@@ -43,10 +43,17 @@ CAMERA_WARMUP_FRAMES = int(os.environ.get("CAMERA_WARMUP_FRAMES", "5"))
 # model weights. Enable with DETECTION_ENABLED=true and pick the backend:
 #   mock      -> deterministic demo detections (person/red_box/yellow_box)
 #   yolo      -> your trained YOLO ONNX in models/detection/ (Phase 4C)
+#   dual      -> general + custom ONNX, merged with cross-model NMS
 #   heuristic -> model-free HSV color + motion detection, no weights needed
 DETECTION_ENABLED = _env_bool("DETECTION_ENABLED")
 DETECTION_BACKEND = os.environ.get("DETECTION_BACKEND", "mock").strip().lower()
 DETECTION_MODEL_PATH = os.environ.get("DETECTION_MODEL_PATH", "detection/yolov8n.onnx")
+DETECTION_GENERAL_MODEL_PATH = (
+    os.environ.get("DETECTION_GENERAL_MODEL_PATH", "").strip() or "detection/yolov8n.onnx"
+)
+DETECTION_CUSTOM_MODEL_PATH = (
+    os.environ.get("DETECTION_CUSTOM_MODEL_PATH", "").strip() or "detection/experiment_custom.onnx"
+)
 DETECTION_CONF_THRESHOLD = float(os.environ.get("DETECTION_CONF_THRESHOLD", "0.5"))
 DETECTION_POLL_MS = int(os.environ.get("DETECTION_POLL_MS", "10"))
 # Explicit OpenCV thread pool size for the detector. 0 (default) leaves OpenCV's

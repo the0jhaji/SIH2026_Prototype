@@ -129,6 +129,7 @@ detects for the *dashboard* — same spirit, pixel-space boxes:
 | `detector.py` | `BaseDetector` interface + `create_detector(kind, ...)` factory |
 | `mock_detector.py` | deterministic mock — `person 0.95 / red_box 0.91 / yellow_box 0.89`, boxes scale with frame size, `scene="empty"` yields none |
 | `yolo_detector.py` | ONNX via `cv2.dnn`, reuses the pipeline's `letterbox` / `postprocess_yolov8` / `resolve_weights_path`; optional `.names` file overrides classes |
+| `dual_yolo.py` | runs independently configured general + custom ONNX models sequentially, then merges them with cross-model NMS |
 
 `YoloDetector` defaults to `detection/yolov8n.onnx` (i.e. `models/detection/`,
 see that README for the generic-pretrained-model limitation). Tests:

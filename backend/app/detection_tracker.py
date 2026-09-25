@@ -25,6 +25,7 @@ _ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from ai.detection import detect_log
 from ai.detection.types import Detection
 
 _IOU_THRESHOLD = 0.3
@@ -46,6 +47,7 @@ class _Track:
     last_matched: int = -1
     timestamp: int = 0
     instance_id: str | None = None
+    label: str = ""
 
 
 class TemporalTracker:
@@ -68,6 +70,7 @@ class TemporalTracker:
         self._tracks: list[_Track] = []
         self._seq = 0
         self._frame = 0
+        self._class_counts: dict[str, int] = {}
 
     # ------------------------------------------------------------- internals
 
@@ -120,6 +123,15 @@ class TemporalTracker:
                     instance_id=f"unknown-{self._seq}" if d.class_name == "unknown_object" else None,
                 )
                 self._tracks.append(t)
+                idx = self._class_counts.get(d.class_name, 0) + 1
+                self._class_counts[d.class_name] = idx
+                t.label = t.instance_id or f"{d.class_name}#{idx}"
+                detect_log.ensure_setup()
+                detect_log.dbg_info(
+                    "TRACK",
+                    f"CREATE label={t.label} class={d.class_name} conf={d.confidence:.2f} "
+                    f"bbox=({float(d.x1):.0f},{float(d.y1):.0f},{float(d.x2):.0f},{float(d.y2):.0f})",
+                )
             t.conf = self._a_conf * d.confidence + (1.0 - self._a_conf) * t.conf
             t.x1 = self._a_box * d.x1 + (1.0 - self._a_box) * t.x1
             t.y1 = self._a_box * d.y1 + (1.0 - self._a_box) * t.y1
@@ -128,13 +140,27 @@ class TemporalTracker:
             t.seen += 1
             t.timestamp = d.timestamp
             t.last_matched = self._frame
+            if t.seen >= self.debounce_frames and not t.confirmed:
+                detect_log.dbg_info(
+                    "TRACK",
+                    f"PROMOTED label={t.label} class={t.class_name} conf={t.conf:.2f} "
+                    f"bbox=({t.x1:.0f},{t.y1:.0f},{t.x2:.0f},{t.y2:.0f})",
+                )
             if t.seen >= self.debounce_frames:
                 t.confirmed = True
+            detect_log.dbg(
+                "TRACK",
+                f"UPDATE label={t.label} class={t.class_name} ema_conf={t.conf:.2f} seen={t.seen}",
+            )
             matched.add(id(t))
-        self._tracks = [
-            t for t in self._tracks
-            if id(t) in matched or self._frame - t.last_matched <= _GRACE_FRAMES
+        lost = [
+            t
+            for t in self._tracks
+            if id(t) not in matched and self._frame - t.last_matched > _GRACE_FRAMES
         ]
+        for t in lost:
+            detect_log.dbg_info("TRACK", f"LOST label={t.label} class={t.class_name}")
+        self._tracks = [t for t in self._tracks if id(t) not in {id(x) for x in lost}]
         for t in self._tracks:
             if not (t.confirmed and id(t) in matched):
                 continue

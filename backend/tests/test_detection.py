@@ -167,6 +167,35 @@ def test_detector_failure_surfaces_error_but_app_survives() -> None:
         assert dets["inferenceStatus"] == "error"
 
 
+def test_detection_service_forwards_dual_model_paths(monkeypatch) -> None:
+    from camera import CameraManager
+
+    from ai.detection import detector as detector_module
+
+    captured: dict = {}
+    real_factory = detector_module.create_detector
+
+    def fake_factory(kind, **kwargs):
+        captured["kind"] = kind
+        captured.update(kwargs)
+        return real_factory("mock")
+
+    monkeypatch.setattr(detector_module, "create_detector", fake_factory)
+    service = DetectionService(
+        CameraManager(MOCK_SETTINGS),
+        enabled=True,
+        kind="dual",
+        general_model_path="general.onnx",
+        custom_model_path="custom.onnx",
+        unknown_enabled=False,
+    )
+    service.stop()
+
+    assert captured["kind"] == "dual"
+    assert captured["general_model_path"] == "general.onnx"
+    assert captured["custom_model_path"] == "custom.onnx"
+
+
 def test_missing_yolo_weights_reports_clear_error() -> None:
     detector = create_detector("yolo", model_path="definitely_missing_model.onnx")
     with make_client(detector=detector) as client:
