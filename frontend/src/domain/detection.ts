@@ -28,6 +28,16 @@ export interface DetectionStatus {
   detectionCount: number
   rawDetectionCount: number
   unknownCount: number
+  /** Configured AI rate cap; 0 = uncapped. Camera FPS is independent. */
+  targetFps: number
+  /** Measured AI inferences/sec over the last window. */
+  actualFps: number
+  /** Total inferences performed by the service thread. */
+  inferenceCount: number
+  /** Camera frames dropped because the rate gate was not due yet (never queued). */
+  skippedForRate: number
+  /** Verbose per-candidate detection trace log (off by default; expensive). */
+  traceEnabled: boolean
   error: string | null
 }
 

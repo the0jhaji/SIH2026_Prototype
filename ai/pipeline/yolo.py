@@ -112,41 +112,42 @@ def postprocess_yolov8(
     inv_scale = 1.0 / scale if scale != 0 else 1.0
     offset_x = dx * inv_scale
     offset_y = dy * inv_scale
-    _cand = np.where(scores >= 0.02)[0][:300]
-    for ci in np.atleast_1d(_cand):
-        c = int(ci)
-        cid = int(class_ids[c])
-        s = float(scores[c])
-        cx = float(arr[c, 0]) * input_size * inv_scale
-        cy = float(arr[c, 1]) * input_size * inv_scale
-        hw = float(arr[c, 2]) * input_size * 0.5 * inv_scale
-        hh = float(arr[c, 3]) * input_size * 0.5 * inv_scale
-        bx1 = int(np.clip(round(cx - hw - offset_x), 0, frame_width))
-        by1 = int(np.clip(round(cy - hh - offset_y), 0, frame_height))
-        bx2 = int(np.clip(round(cx + hw - offset_x), 0, frame_width))
-        by2 = int(np.clip(round(cy + hh - offset_y), 0, frame_height))
-        if cid >= num_classes:
-            detect_log.dbg("CLASS", f"class_id={cid} class_name=unknown conf={s:.2f} bbox=({bx1},{by1},{bx2},{by2})")
-            detect_log.dbg("CLASS_MAP", f"source={cid} mapped_to=None(dropped, outside class range {num_classes})")
-            detect_log.bump("unknown")
-            continue
-        name = classes[cid]
-        detect_log.dbg(
-            "RAW",
-            f"class_id={cid} class={name} conf={s:.2f} bbox=({bx1},{by1},{bx2},{by2}) "
-            f"center=({(bx1 + bx2) // 2},{(by1 + by2) // 2}) w={bx2 - bx1} h={by2 - by1}",
-        )
-        detect_log.bump("raw")
-        if s < conf_threshold:
-            detect_log.dbg_info(
-                "FILTER", f"reason=confidence class={name} conf={s:.2f} threshold={conf_threshold:.2f}"
+    if detect_log.enabled():
+        _cand = np.where(scores >= 0.02)[0][:300]
+        for ci in np.atleast_1d(_cand):
+            c = int(ci)
+            cid = int(class_ids[c])
+            s = float(scores[c])
+            cx = float(arr[c, 0]) * input_size * inv_scale
+            cy = float(arr[c, 1]) * input_size * inv_scale
+            hw = float(arr[c, 2]) * input_size * 0.5 * inv_scale
+            hh = float(arr[c, 3]) * input_size * 0.5 * inv_scale
+            bx1 = int(np.clip(round(cx - hw - offset_x), 0, frame_width))
+            by1 = int(np.clip(round(cy - hh - offset_y), 0, frame_height))
+            bx2 = int(np.clip(round(cx + hw - offset_x), 0, frame_width))
+            by2 = int(np.clip(round(cy + hh - offset_y), 0, frame_height))
+            if cid >= num_classes:
+                detect_log.dbg("CLASS", f"class_id={cid} class_name=unknown conf={s:.2f} bbox=({bx1},{by1},{bx2},{by2})")
+                detect_log.dbg("CLASS_MAP", f"source={cid} mapped_to=None(dropped, outside class range {num_classes})")
+                detect_log.bump("unknown")
+                continue
+            name = classes[cid]
+            detect_log.dbg(
+                "RAW",
+                f"class_id={cid} class={name} conf={s:.2f} bbox=({bx1},{by1},{bx2},{by2}) "
+                f"center=({(bx1 + bx2) // 2},{(by1 + by2) // 2}) w={bx2 - bx1} h={by2 - by1}",
             )
-            detect_log.bump("rejected_confidence")
-        else:
-            detect_log.dbg("FILTER", f"ACCEPT class={name} conf={s:.2f}")
-            detect_log.bump("accepted")
-    if len(_cand) >= 300:
-        detect_log.dbg("RAW", f"raw_truncated=true (first 300 of {len(scores)} candidates logged)")
+            detect_log.bump("raw")
+            if s < conf_threshold:
+                detect_log.dbg_info(
+                    "FILTER", f"reason=confidence class={name} conf={s:.2f} threshold={conf_threshold:.2f}"
+                )
+                detect_log.bump("rejected_confidence")
+            else:
+                detect_log.dbg("FILTER", f"ACCEPT class={name} conf={s:.2f}")
+                detect_log.bump("accepted")
+        if len(_cand) >= 300:
+            detect_log.dbg("RAW", f"raw_truncated=true (first 300 of {len(scores)} candidates logged)")
 
     keep = scores >= conf_threshold
     keep &= class_ids < num_classes

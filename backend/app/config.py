@@ -66,6 +66,16 @@ DETECTION_CV_THREADS = int(os.environ.get("DETECTION_CV_THREADS", "0"))
 DETECTION_DEBOUNCE_FRAMES = int(os.environ.get("DETECTION_DEBOUNCE_FRAMES", "2"))
 DETECTION_EMA_ALPHA = float(os.environ.get("DETECTION_EMA_ALPHA", "0.35"))
 
+# Detection rate decoupled from the camera rate. The camera keeps serving 25-30 FPS
+# for the live view; AI perception runs at its own budget and simply consumes the
+# NEWEST frame each time it wakes. Measured on this host, one yolov8n 640 forward is
+# 200-400ms, so the loop is self-limiting to ~2-4 FPS single / ~0.5-1 FPS dual; this
+# cap makes that honest and configurable instead of a free-running spin. 0 = uncapped.
+DETECTION_FPS = float(os.environ.get("DETECTION_FPS", "8"))
+# Per-candidate decode tracing. Off by default: the RAW/FILTER hooks emit one flushed
+# line per candidate above a 0.02 floor (~40-100/frame/model) and grew the log to 55MB.
+DETECT_LOG_ENABLED = _env_bool("DETECT_LOG_ENABLED")
+
 # Unknown/generic object proposals (a companion to the known-class detector).
 #   - UNKNOWN_DETECTION_ENABLED: run the model-free motion-foreground proposer
 #     alongside the known detector (default on).
@@ -93,6 +103,38 @@ ATTENDANCE_TRACK_LOST_FRAMES = int(os.environ.get("ATTENDANCE_TRACK_LOST_FRAMES"
 #: torso/head band) — an object at the astronaut's feet is NOT "held".
 ATTENDANCE_ARM_REACH = float(os.environ.get("ATTENDANCE_ARM_REACH", "0.6"))
 ATTENDANCE_UPPER_BODY = float(os.environ.get("ATTENDANCE_UPPER_BODY", "0.45"))
+
+# Unattended-object-in-container monitoring. The frame-count thresholds above drive
+# the *unknown* hand-off chain; these drive the real reported failure, where a KNOWN
+# object (a bottle, a tool) is placed in a container and the astronaut walks away.
+#   - UNATTENDED_TIMEOUT_MS: wall-clock an object must be person-free before the
+#     alert fires. Time-based, not frame-based, so it is independent of AI frame rate
+#     (at 2-4 measured FPS, 5 frames would be 1.2-2.5s of wall clock and wildly variable).
+#   - UNATTENDED_PROXIMITY: a person counts as attending when its box centre is within
+#     this fraction of the frame diagonal of the object centre.
+#   - UNATTENDED_CONTAINMENT: minimum fraction of the object box that must lie inside
+#     a container box before the pair is reported as OBJECT_INSIDE_CONTAINER.
+#   - UNATTENDED_CONTAINER_CLASSES / UNATTENDED_TRACKED_CLASSES: the vocabulary is
+#     data here, never hardcoded logic; containers are what we look *into*, tracked
+#     classes are what we look *at* (person is excluded by definition).
+UNATTENDED_TIMEOUT_MS = int(os.environ.get("UNATTENDED_TIMEOUT_MS", "2000"))
+UNATTENDED_PROXIMITY = float(os.environ.get("UNATTENDED_PROXIMITY", "0.18"))
+UNATTENDED_CONTAINMENT = float(os.environ.get("UNATTENDED_CONTAINMENT", "0.60"))
+UNATTENDED_CONTAINER_CLASSES = tuple(
+    c.strip()
+    for c in os.environ.get(
+        "UNATTENDED_CONTAINER_CLASSES", "experiment_box,red_box,yellow_box,box,container,suitcase,briefcase"
+    ).split(",")
+    if c.strip()
+)
+UNATTENDED_TRACKED_CLASSES = tuple(
+    c.strip()
+    for c in os.environ.get(
+        "UNATTENDED_TRACKED_CLASSES",
+        "bottle,knife,pen,floating_tool,loose_cable,cup,mug,can,book,phone,laptop,tool,scissors",
+    ).split(",")
+    if c.strip()
+)
 
 # Activity perception stage (Phase 5C bridge). Chooses which source feeds the
 # state machine at runtime.

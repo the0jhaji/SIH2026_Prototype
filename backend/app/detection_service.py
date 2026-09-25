@@ -49,6 +49,8 @@ class DetectionService:
         custom_model_path: str | None = None,
         conf_threshold: float = 0.5,
         poll_ms: int = 100,
+        target_fps: float = 0.0,
+        trace: bool = False,
         scene: str | None = None,
         cv_threads: int | None = None,
         debounce_frames: int = 2,
@@ -69,6 +71,14 @@ class DetectionService:
         self._custom_model_path = custom_model_path
         self._conf_threshold = conf_threshold
         self._poll_ms = max(10, poll_ms)
+        self._target_fps = max(0.0, float(target_fps or 0.0))
+        self._trace = bool(trace)
+        self._next_due = 0.0
+        self._inference_count = 0
+        self._skipped_for_rate = 0
+        self._fps_window_started = time.perf_counter()
+        self._fps_window_count = 0
+        self._actual_fps = 0.0
         self._scene = scene
         self._cv_threads = cv_threads
         self._detector = detector
@@ -96,6 +106,7 @@ class DetectionService:
     def _bootstrap(self) -> None:
         """Create the detector from config if none was injected, then start the
         worker thread. Failures are recorded as an ERROR status — never raised."""
+        detect_log.set_enabled(self._trace)
         if self._detector is None:
             try:
                 from ai.detection.detector import create_detector
@@ -198,6 +209,16 @@ class DetectionService:
         cap = self._camera.latest_capture()
         if cap is None or cap[0] == last_id:
             return last_id
+        # Rate gate: always take the NEWEST frame, never a backlog. If the camera
+        # produced frames while we were busy, the intermediate ones are dropped on
+        # purpose — queuing them would only add latency and inflate the backlog.
+        if self._target_fps > 0:
+            now = time.perf_counter()
+            if now < self._next_due:
+                with self._lock:
+                    self._skipped_for_rate += 1
+                return last_id
+            self._next_due = now + (1.0 / self._target_fps)
         frame_id, frame = cap
         started = time.perf_counter()
         detect_log.ensure_setup()
@@ -256,6 +277,13 @@ class DetectionService:
             self._raw_unknown_detections = [d.to_dict() for d in unknown_raw]
             self._unknown_detections = [d.to_dict() for d in unknown_stable]
             self._frame_size = (frame.shape[1], frame.shape[0])
+            self._inference_count += 1
+            self._fps_window_count += 1
+            window = time.perf_counter() - self._fps_window_started
+            if window >= 1.0:
+                self._actual_fps = self._fps_window_count / window
+                self._fps_window_count = 0
+                self._fps_window_started = time.perf_counter()
         self._maybe_summary()
         self._dbg_state_change()
         return frame_id
@@ -343,7 +371,9 @@ class DetectionService:
                 "unknownCount": 0,
                 "unknownDetections": [],
                 "rawUnknownDetections": [],
+                "inferenceMs": None,
                 "error": None,
+                **self._rate_payload(),
             }
         det = self._detector
         with self._lock:
@@ -354,6 +384,7 @@ class DetectionService:
             unknown_count = len(self._unknown_detections)
             unknown = list(self._unknown_detections)
             raw_unknown = list(self._raw_unknown_detections)
+            rates = self._rate_payload()
         det_status = det.status() if det is not None else None
         return {
             "enabled": True,
@@ -366,12 +397,24 @@ class DetectionService:
             "unknownMode": self._generic.mode if self._generic is not None else None,
             "inferenceStatus": "error" if error else ("ok" if last_inf is not None else "idle"),
             "lastInference": last_inf,
+            "inferenceMs": self._inference_ms,
             "detectionCount": count,
             "rawDetectionCount": raw_count,
             "unknownCount": unknown_count,
             "unknownDetections": unknown,
             "rawUnknownDetections": raw_unknown,
             "error": error,
+            **rates,
+        }
+
+    def _rate_payload(self) -> dict:
+        """Honest rate telemetry: what was asked for vs what the host achieved."""
+        return {
+            "targetFps": self._target_fps,
+            "actualFps": round(self._actual_fps, 2),
+            "inferenceCount": self._inference_count,
+            "skippedForRate": self._skipped_for_rate,
+            "traceEnabled": self._trace,
         }
 
     def latest(self) -> dict:
@@ -384,6 +427,7 @@ class DetectionService:
             last_inf = self._last_inference_ms
             inference_ms = self._inference_ms
             error = self._last_error
+            rates = self._rate_payload()
         return {
             "enabled": self._enabled,
             "frameWidth": frame_size[0] if frame_size else None,
@@ -396,4 +440,5 @@ class DetectionService:
             "inferenceMs": inference_ms,
             "inferenceStatus": "error" if error else ("ok" if last_inf is not None else "idle"),
             "error": error,
+            **rates,
         }

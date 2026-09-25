@@ -1,5 +1,6 @@
 import { CAMERA_STREAM_URL } from '../domain/camera'
 import { CLASS_COLOR, type DetectionResult, type DetectionStatus } from '../domain/detection'
+import type { AttendanceResult, AttendanceStatus } from '../domain/attendance'
 import { LiveCameraFeed } from '../components/LiveFeed'
 import { Empty, Panel, StatTile } from './ui'
 import type { SafetyCommonProps } from './props'
@@ -7,6 +8,19 @@ import type { SafetyCommonProps } from './props'
 interface Props extends SafetyCommonProps {
   detectionStatus: DetectionStatus | null
   detectionResult: DetectionResult | null
+  attendance: AttendanceResult | null
+  attendanceStatus: AttendanceStatus | null
+}
+
+const STATE_TONE: Record<string, string> = {
+  UNATTENDED: 'text-error border-error/50 bg-error/10',
+  RELEASED: 'text-warning border-warning/50 bg-warning/10',
+  ATTENDED: 'text-tertiary border-outline-variant/40 bg-surface-container-low',
+  OBJECT_INSIDE_BOX: 'text-primary border-primary/40 bg-primary/10',
+}
+
+function watchTone(state: string): string {
+  return STATE_TONE[state] ?? 'text-on-surface-variant border-outline-variant/40 bg-surface-container-low'
 }
 
 export function CameraView({
@@ -16,6 +30,8 @@ export function CameraView({
   onCameraStop,
   detectionResult,
   detectionStatus,
+  attendance,
+  attendanceStatus,
 }: Props) {
   const streamUrl = cameraRunning ? CAMERA_STREAM_URL : null
   const detections = cameraRunning ? detectionResult?.detections ?? [] : []
@@ -122,6 +138,22 @@ export function CameraView({
               }
             />
             <StatTile
+              label="AI Rate"
+              value={
+                detectionStatus?.actualFps != null
+                  ? `${detectionStatus.actualFps.toFixed(1)}/${detectionStatus.targetFps ?? '—'} fps`
+                  : '—'
+              }
+            />
+            <StatTile
+              label="Frames Dropped"
+              value={detectionStatus?.skippedForRate != null ? String(detectionStatus.skippedForRate) : '—'}
+            />
+            <StatTile
+              label="Trace"
+              value={detectionStatus?.traceEnabled ? 'ON (verbose)' : 'OFF'}
+            />
+            <StatTile
               label="Last"
               value={detectionStatus?.lastInference ? new Date(detectionStatus.lastInference).toLocaleTimeString() : '—'}
             />
@@ -153,6 +185,105 @@ export function CameraView({
             </ul>
           ) : (
             <Empty label="No class vocabulary (generic model)." />
+          )}
+        </Panel>
+
+        <Panel
+          title="Object Containment & Attendance"
+          right={
+            <span className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">
+              {attendanceStatus?.objects != null
+                ? `${attendanceStatus.objects} TRACKED · ${attendanceStatus.unattendedCount ?? 0} UNATTENDED`
+                : 'IDLE'}
+            </span>
+          }
+        >
+          <div className="grid grid-cols-3 gap-2">
+            <StatTile
+              label="In Container"
+              value={String(attendanceStatus?.inContainerCount ?? 0)}
+            />
+            <StatTile
+              label="Unattended"
+              value={String(attendanceStatus?.unattendedCount ?? 0)}
+            />
+            <StatTile
+              label="Timeout"
+              value={
+                attendanceStatus?.thresholds?.unattendedTimeoutMs != null
+                  ? `${(attendanceStatus.thresholds.unattendedTimeoutMs / 1000).toFixed(1)}s`
+                  : '—'
+              }
+            />
+          </div>
+
+          {!cameraRunning ? (
+            <Empty label="Camera offline — containment needs the live feed." />
+          ) : (attendance?.watches ?? []).length === 0 ? (
+            <Empty label="Tracking objects. Show an object near a container." />
+          ) : (
+            <ul className="mt-3 space-y-1.5">
+              {(attendance?.watches ?? []).map(w => (
+                <li
+                  key={w.instanceId}
+                  className={`border px-2.5 py-1.5 ${watchTone(w.state)}`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-[11px] font-bold uppercase tracking-wider">
+                      {w.className.replace(/_/g, ' ')}
+                    </span>
+                    <span className="font-mono text-[10px] uppercase tracking-wider">
+                      {w.state.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap gap-x-3 font-mono text-[10px] opacity-80">
+                    {w.insideContainer ? (
+                      <span>
+                        IN {w.containerClass?.replace(/_/g, ' ') ?? '?'} ·{' '}
+                        {(w.containmentScore * 100).toFixed(0)}%
+                      </span>
+                    ) : null}
+                    {!w.isUnknown && w.personFreeMs > 0 ? (
+                      <span>NO CREW {Math.round(w.personFreeMs)}ms</span>
+                    ) : null}
+                    {w.isUnknown ? <span>UNKNOWN CLASS</span> : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {(attendance?.events ?? []).length > 0 && (
+            <div className="mt-3">
+              <p className="mb-1 font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">
+                Recent events
+              </p>
+              <ul className="space-y-1">
+                {(attendance?.events ?? [])
+                  .slice(-6)
+                  .reverse()
+                  .map(e => (
+                    <li key={`${e.kind}-${e.ts}`} className="font-mono text-[10px] leading-snug">
+                      <span className="text-on-surface-variant">
+                        {new Date(e.ts).toLocaleTimeString()}
+                      </span>{' '}
+                      <span
+                        className={
+                          e.severity === 'warn'
+                            ? 'text-warning'
+                            : e.severity === 'error'
+                              ? 'text-error'
+                              : 'text-on-surface'
+                        }
+                      >
+                        {e.kind.replace(/_/g, ' ')}
+                      </span>
+                      {e.object ? <span className="opacity-70"> · {e.object}</span> : null}
+                      {e.reason ? <span className="opacity-60"> — {e.reason}</span> : null}
+                    </li>
+                  ))}
+              </ul>
+            </div>
           )}
         </Panel>
       </div>

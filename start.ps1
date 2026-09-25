@@ -132,14 +132,20 @@ Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
 try {
     # ---------------------------------------------------------------- backend
     Write-Step "Starting FastAPI backend on port $BackendPort (detection: yolo)..."
-    # Env for dual ONNX detection + camera-grounded activity perception.
+    # Env for single-model ONNX detection + camera-grounded activity perception.
     #   CAMERA_MOCK=false  → use real webcam (or set CAMERA_INDEX/CAMERA_WIDTH/CAMERA_HEIGHT)
     #   DETECTION_ENABLED=true  → enable detection
-    #   DETECTION_BACKEND=dual  → general + custom ONNX, cross-model NMS
-    #   ACTIVITY_BACKEND=live  → camera-grounded perception (default)
+    #   DETECTION_BACKEND=yolo  → ONE primary detector (general COCO). Measured on this
+    #       host: dual (general+custom) cost ~0.5-2.2s/frame vs ~0.24-0.52s single,
+    #       because inference is ~85% of the cost and dual runs it twice. The custom
+    #       model only adds red_box/yellow_box; switch DETECTION_BACKEND=dual if you
+    #       need those two classes back and can accept the latency.
+    #   DETECTION_FPS  → AI rate cap, decoupled from the 30 FPS camera (newest frame wins)
+    #   UNATTENDED_TIMEOUT_MS → wall-clock before an unattended object alerts (default 2000)
     $env:CAMERA_MOCK = 'false'
     $env:DETECTION_ENABLED = 'true'
-    $env:DETECTION_BACKEND = 'dual'
+    $env:DETECTION_BACKEND = 'yolo'
+    $env:DETECTION_FPS = '8'
     $env:ACTIVITY_BACKEND = 'live'
     $backend = Start-Process -FilePath $BackendPy `
         -ArgumentList '-m','uvicorn','app.main:app','--host','0.0.0.0','--port',"$BackendPort" `
@@ -189,7 +195,7 @@ try {
         try {
             $det = $null
             for ($i = 0; $i -lt 20 -and $null -eq $det; $i++) { $det = Invoke-Get "$BackendUrl/api/detection/status" 3; Start-Sleep -Milliseconds 400 }
-            Write-Host "  detection: enabled=$($det.enabled) detector=$($det.detector) status=$($det.inferenceStatus)" -ForegroundColor Green
+            Write-Host "  detection: enabled=$($det.enabled) detector=$($det.detector) status=$($det.inferenceStatus) targetFps=$($det.targetFps) actualFps=$($det.actualFps) inferMs=$($det.inferenceMs)" -ForegroundColor Green
         } catch { Write-Err "  detection status unavailable: $($_.Exception.Message)" }
     } else {
         Write-Err "Backend did not become ready on $BackendUrl within timeout."

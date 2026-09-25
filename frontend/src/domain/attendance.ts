@@ -1,14 +1,17 @@
 /** Mirror of the backend attendance (held/unattended) payloads (camelCase JSON). */
 
+export type AttendanceState =
+  | 'UNKNOWN_DETECTED'
+  | 'POSSIBLY_HELD'
+  | 'HELD'
+  | 'RELEASED'
+  | 'UNATTENDED'
+  | 'GONE'
+  | 'ATTENDED'
+
 export interface AttendanceWatch {
   instanceId: string
-  state:
-    | 'UNKNOWN_DETECTED'
-    | 'POSSIBLY_HELD'
-    | 'HELD'
-    | 'RELEASED'
-    | 'UNATTENDED'
-    | 'GONE'
+  state: AttendanceState
   box: {
     class_name: string
     confidence: number
@@ -19,9 +22,16 @@ export interface AttendanceWatch {
     timestamp: number
     instance_id?: string
   }
+  className: string
+  isUnknown: boolean
   firstSeenMs: number
   framesInState: number
   personId: string | null
+  personFreeMs: number
+  insideContainer: boolean
+  containerId: string | null
+  containerClass: string | null
+  containmentScore: number
   transitions: { state: string; ts: number; reason: string }[]
 }
 
@@ -30,12 +40,18 @@ export interface AttendanceStatus {
   objects: number
   unattendedCount: number
   heldCount: number
+  inContainerCount: number
   thresholds: {
     heldFrames: number
     unattendedFrames: number
     trackLostFrames: number
     armReach: number
     upperBody: number
+    unattendedTimeoutMs: number
+    proximity: number
+    containment: number
+    containerClasses: string[]
+    trackedClasses: string[]
   }
 }
 
@@ -62,6 +78,10 @@ export interface AttendanceEvent {
   level?: string
   alertId?: string
   message?: string
+  object?: string
+  objectClass?: string
+  containerClass?: string
+  containmentScore?: number
 }
 
 export interface AttendanceResult {

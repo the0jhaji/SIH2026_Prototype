@@ -5,6 +5,14 @@ coupling to FastAPI. Writes timestamped DEBUG lines to ``logs/detection_debug.lo
 and echoes INFO+ to the console. Observability only — nothing here changes how
 any detector or downstream module behaves.
 
+Tracing is OFF by default at the *runtime* seam (``DetectionService`` clears the
+gate from config) because the YOLO decode hook logs one line per candidate above a
+logging floor: on a real scene that is ~40-100 flushed writes per frame, two models
+per frame in ``dual`` mode, which measured 28ms/frame on its own and grew the log
+to 55MB. The gate is a single bool so the disabled path costs one branch, and
+callers that gate a whole hot loop (the decode candidate sweep) pay nothing at all.
+Tests and one-off tracing keep the default-on behaviour.
+
 The module-level counters let per-stage logs accumulated in the YOLO decode
 layer (raw boxes seen, accepted, confidence-rejected, unknown) be surfaced as
 the per-second [DETECT][SUMMARY] line by the DetectionService, which consumes
@@ -27,6 +35,21 @@ _COUNTERS = {
     "unknown": 0,
 }
 _setup_done = False
+#: Runtime gate. True keeps the historical always-on tracing behaviour (tests,
+#: one-off debugging); the backend DetectionService clears it from config so
+#: normal operation pays one branch per call and writes no log at all.
+_enabled = True
+
+
+def enabled() -> bool:
+    """Single-bool gate for hot tracing paths. Cheap enough for per-candidate use."""
+    return _enabled
+
+
+def set_enabled(value: bool) -> None:
+    """Turn tracing on/off at runtime. Idempotent; no handlers are removed."""
+    global _enabled
+    _enabled = bool(value)
 
 
 class _FileFormatter(logging.Formatter):
@@ -80,22 +103,30 @@ def ensure_setup(root: Path | None = None, log_file: Path | None = None) -> Path
 
 def dbg(tag: str, msg: str) -> None:
     """File-only DEBUG line (not echoed to console)."""
+    if not _enabled:
+        return
     ensure_setup()
     _LOG.debug("[DETECT][%s] %s", tag, msg)
 
 
 def dbg_info(tag: str, msg: str) -> None:
     """Info line: file + console."""
+    if not _enabled:
+        return
     ensure_setup()
     _LOG.info("[DETECT][%s] %s", tag, msg)
 
 
 def dbg_warn(tag: str, msg: str) -> None:
+    if not _enabled:
+        return
     ensure_setup()
     _LOG.warning("[DETECT][%s] %s", tag, msg)
 
 
 def dbg_error(tag: str, msg: str) -> None:
+    if not _enabled:
+        return
     ensure_setup()
     _LOG.error("[DETECT][%s] %s", tag, msg)
 

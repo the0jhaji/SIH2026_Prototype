@@ -94,6 +94,25 @@ its own daemon thread and exposes `GET /api/detection/status` +
 - The DetectionService thread calls only `camera_manager.latest_capture()`
   (frames identified by frame id) — never locked methods, never the MJPEG
   generator; it must keep working when the camera is stopped (idle).
+- **AI rate is decoupled from camera FPS.** `DETECTION_FPS` (default 8, `0` =
+  uncapped) caps inference in `_infer_once`; the camera keeps its own FPS. The
+  thread always takes the **newest** frame — rate-skipped frames are dropped,
+  never queued, so no backlog forms. `status()` adds `targetFps`/`actualFps`/
+  `inferenceCount`/`skippedForRate`/`traceEnabled`. `actualFps` is a *cap*,
+  not a guarantee: it equals the model rate when inference is slower.
+- `DETECT_LOG_ENABLED` (default **false**) gates `ai/detection/detect_log.py`
+  via `set_enabled()`; `postprocess_yolov8` wraps its whole per-candidate
+  decode sweep in one `if`. Measured 23.8 -> 5.5 ms/frame. Verbose tracing
+  costs real time — never leave it on in a normal run.
+- Both shipped ONNX models are hard-fixed at 640x640; a smaller `input_size`
+  fails with `outTotal == inpTotal` in the DNN reshape. Thread-priority bumps
+  gave no measurable gain — do not re-add them. `yolov8n.onnx` is COCO-84
+  (`person`, `bottle`); `experiment_custom.onnx` is the only source of
+  `red_box`/`yellow_box`, so those need `DETECTION_BACKEND=dual` (~2x cost).
+- Measured costs: camera JPEG 8.3ms, preprocess 4.6ms, postprocess 5.5ms,
+  generic motion 11.3ms, but **one 640 forward ~203ms — inference is ~90% of
+  the budget**. Optimise the number of forwards, not the surrounding Python.
+  See `docs/PERFORMANCE_AND_UNATTENDED_REPORT.md`.
 - Backend/ai venvs are separate: `backend/tests/test_detection.py` imports
   `ai` after `app.main` (which puts the repo root on `sys.path`);
   `ai/tests/test_detection.py` runs under `ai/.venv` (root inserted via
@@ -141,6 +160,43 @@ at runtime (same `Detection` shape the scripted feed always used). Rules:
   separate, honest sidebar.
 - `ExperimentService.start(perception)` only needs an async `detections()`
   iterator — swap sources without touching decision-making.
+
+### Unattended-object monitoring
+
+`backend/app/attendance.py` (`AttendanceMonitor`) turns detections into
+held/unattended object watches. Two chains, deliberately kept separate:
+
+- **unknown** (`is_unknown`): the original `UNKNOWN_DETECTED -> POSSIBLY_HELD
+  -> HELD -> RELEASED -> UNATTENDED` machine, frame-counted, requires an
+  `HELD -> RELEASED` transition. Unchanged; `test_unknown_objects.py` guards it.
+- **known** (`UNATTENDED_TRACKED_CLASSES`, e.g. `bottle`): proximity + wall
+  clock. A placed-and-left object is tracked from its **first** detection, so
+  never require `HELD`/`RELEASED`.
+
+Rules:
+
+- `AttendanceMonitor._reconcile` must feed **both** `unknownDetections` and the
+  tracked known classes. Watching only unknown detections is the original bug:
+  known objects were invisible, so nothing ever alerted.
+- Containment is `_containment_score` = intersection-over-**object**-area
+  ("how much of the object is in the container"), threshold
+  `UNATTENDED_CONTAINMENT`. It must be a real intersection test; a loose
+  inequality such as `y2 > box.y1` can never fire and looks implemented while
+  doing nothing. `OBJECT_INSIDE_BOX` is an **event**, never a state.
+- Unattended uses **wall clock** (`UNATTENDED_TIMEOUT_MS`), not frame counts.
+  At ~1 AI FPS a 5-frame rule means 5 s, at 25 FPS it means 0.2 s.
+- Person association is normalised bbox-centre proximity
+  (`UNATTENDED_PROXIMITY`); hand/pose is not wired in, so "touch" is
+  approximated by body proximity. Say so in docs.
+- A stale feed must freeze state (`ACTIVITY_STALE_MS`) — never time out or
+  resolve on a dead feed.
+- Attendance needs a **UI** or the work is invisible: `useAttendance` already
+  polls into context, and `CameraView` renders the containment/attendance panel.
+  If you add a field the panel shows, add it to both `domain/attendance.ts` and
+  `domain/detection.ts` or `tsc -b` fails.
+- Known limitation, keep it honest: `GenericProposalDetector` is motion-only,
+  so a **static unknown** object still disappears once the background adapts.
+  Only known classes are covered. Do not paper over this.
 
 ### Astronaut safety monitoring (Phase 6)
 

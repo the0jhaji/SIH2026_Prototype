@@ -155,6 +155,8 @@ def create_app(
             custom_model_path=config.DETECTION_CUSTOM_MODEL_PATH,
             conf_threshold=config.DETECTION_CONF_THRESHOLD,
             poll_ms=config.DETECTION_POLL_MS,
+            target_fps=config.DETECTION_FPS,
+            trace=config.DETECT_LOG_ENABLED,
             scene=config.MOCK_SCENE or None,
             cv_threads=config.DETECTION_CV_THREADS if config.DETECTION_CV_THREADS > 0 else None,
             debounce_frames=config.DETECTION_DEBOUNCE_FRAMES,
@@ -225,6 +227,11 @@ def create_app(
             track_lost_frames=config.ATTENDANCE_TRACK_LOST_FRAMES,
             arm_reach=config.ATTENDANCE_ARM_REACH,
             upper_body=config.ATTENDANCE_UPPER_BODY,
+            unattended_timeout_ms=config.UNATTENDED_TIMEOUT_MS,
+            proximity=config.UNATTENDED_PROXIMITY,
+            containment=config.UNATTENDED_CONTAINMENT,
+            container_classes=config.UNATTENDED_CONTAINER_CLASSES,
+            tracked_classes=config.UNATTENDED_TRACKED_CLASSES,
             alerts=AlertManager(cooldown_ms=config.ALERT_COOLDOWN_MS),
         )
 
