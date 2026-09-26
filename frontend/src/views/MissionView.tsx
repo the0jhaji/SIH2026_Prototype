@@ -12,6 +12,7 @@ import { hazardLevelsFrom, unattendedIdsFrom } from '../domain/detection'
 import { expectedStep } from '../domain/experiment'
 import { formatTimestamp } from '../lib/time'
 import { CameraStage } from '../components/CameraStage'
+import { useCamera } from '../hooks/cameraController'
 import type { SafetyCommonProps } from './props'
 import { Badge, Empty, EmptyState, KeyValue, Panel, StatTile, SubCard } from './ui'
 import { PageShell, Timeline } from './layout'
@@ -35,14 +36,13 @@ const ACTION_LABEL: Record<string, string> = {
 export function MissionView({
   state,
   engine,
-  cameraRunning,
-  cameraOffline,
-  onCameraStart,
-  onCameraStop,
   safety,
   detection,
   attendance,
 }: SafetyCommonProps) {
+  // The canonical camera state, read from the single controller rather than
+  // from props this view recomputed for itself.
+  const { streamActive, phase } = useCamera()
   const snapshot = safety.snapshot
   const topHazard = snapshot?.top_hazard ?? null
   const monitorState = snapshot?.mission_state ?? 'NORMAL'
@@ -53,10 +53,10 @@ export function MissionView({
   const activeAlerts = safety.alerts.filter(a => !a.resolved && !a.acknowledged)
   const acknowledgedAlerts = safety.alerts.filter(a => !a.resolved && a.acknowledged)
 
-  const detections = cameraRunning ? (detection.result?.detections ?? []) : []
-  const unknownDetections = cameraRunning ? (detection.result?.unknownDetections ?? []) : []
-  const frameW = cameraRunning ? (detection.result?.frameWidth ?? null) : null
-  const frameH = cameraRunning ? (detection.result?.frameHeight ?? null) : null
+  const detections = streamActive ? (detection.result?.detections ?? []) : []
+  const unknownDetections = streamActive ? (detection.result?.unknownDetections ?? []) : []
+  const frameW = streamActive ? (detection.result?.frameWidth ?? null) : null
+  const frameH = streamActive ? (detection.result?.frameHeight ?? null) : null
   const hazardLevels = useMemo(() => hazardLevelsFrom(snapshot?.assessments), [snapshot])
   const unattendedIds = useMemo(() => unattendedIdsFrom(attendance.result?.watches), [attendance])
   const safetyTimeline = useMemo(() => safetyEventEntries(safety.events, 60), [safety.events])
@@ -268,7 +268,7 @@ export function MissionView({
           className="min-h-0"
           right={
             <span className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">
-              CAM-01 · {cameraRunning ? 'live' : 'standby'} · {detections.length + unknownDetections.length}{' '}
+              CAM-01 · {phase === 'live' ? 'live' : phase} · {detections.length + unknownDetections.length}{' '}
               objects
             </span>
           }
@@ -276,8 +276,6 @@ export function MissionView({
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="flex min-h-0 flex-1">
               <CameraStage
-                running={cameraRunning}
-                offline={cameraOffline}
                 detections={detections}
                 unknownDetections={unknownDetections}
                 frameWidth={frameW}
@@ -286,8 +284,6 @@ export function MissionView({
                 unattendedIds={unattendedIds}
                 fill
                 aspect={frameW && frameH ? `${frameW} / ${frameH}` : '16 / 9'}
-                onStart={onCameraStart}
-                onStop={onCameraStop}
               />
             </div>
             <div className="mt-[var(--grid-gap)] grid shrink-0 grid-cols-1 gap-[var(--grid-gap)] sm:grid-cols-3">

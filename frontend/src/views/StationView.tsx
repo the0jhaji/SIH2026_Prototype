@@ -5,6 +5,8 @@ import { formatTimestamp } from '../lib/time'
 import { Badge, EmptyState, KeyValue, MetricCard, Panel, StatTile, SubCard } from './ui'
 import { PageShell, Timeline } from './layout'
 import { safetyEventEntries, stateColor } from './helpers'
+import { useCamera } from '../hooks/cameraController'
+import { CAMERA_PHASE_LABEL } from '../domain/camera'
 import type { SafetyCommonProps } from './props'
 
 /**
@@ -20,13 +22,11 @@ export function StationView({
   state,
   engine,
   engineOffline,
-  camera,
-  cameraRunning,
-  cameraOffline,
   safety,
   detection,
   attendance,
 }: SafetyCommonProps) {
+  const { phase: cameraPhase, streamActive: cameraRunning, info: camera } = useCamera()
   const snapshot = safety.snapshot
   const status = safety.status
   const feed = safety.station
@@ -75,7 +75,7 @@ export function StationView({
         />
         <MetricCard
           label="Camera status"
-          value={cameraOffline ? 'OFFLINE' : cameraRunning ? 'LIVE' : 'STOPPED'}
+          value={CAMERA_PHASE_LABEL[cameraPhase]}
           sub={cameraRunning ? `${camera?.width}×${camera?.height}` : 'start from the Camera view'}
           color={cameraRunning ? MISSION_COLORS.NORMAL : '#64748b'}
           active={cameraRunning}
@@ -108,7 +108,7 @@ export function StationView({
             <SubCard title="Camera feeds">
               <KeyValue
                 label="CAM-01"
-                value={cameraOffline ? 'offline' : cameraRunning ? 'live' : 'stopped'}
+                value={CAMERA_PHASE_LABEL[cameraPhase]}
                 color={cameraRunning ? MISSION_COLORS.NORMAL : '#64748b'}
               />
               <KeyValue

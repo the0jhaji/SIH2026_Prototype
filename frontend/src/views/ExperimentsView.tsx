@@ -1,9 +1,10 @@
 import { useMemo } from 'react'
-import { CAMERA_STREAM_URL } from '../domain/camera'
 import { expectedStep } from '../domain/experiment'
 import { MISSION_COLORS } from '../domain/safety'
 import { LiveFeed } from '../components/LiveFeed'
 import { CameraStage } from '../components/CameraStage'
+import { CameraControls } from '../components/CameraControls'
+import { useCamera } from '../hooks/cameraController'
 import { Badge, Empty, EmptyState, KeyValue, MetricCard, Panel, StatTile, SubCard } from './ui'
 import { PageShell, Timeline } from './layout'
 import { basEventEntries, severityColor } from './helpers'
@@ -16,7 +17,6 @@ type Props = SafetyCommonProps & {
   onStop: () => void
   onEngineStart: () => void
   onEngineStop: () => void
-  cameraSending: boolean
 }
 
 const ACTION_LABEL: Record<string, string> = {
@@ -43,32 +43,28 @@ const RESULT_TONE: Record<string, string> = {
  * canvas feed is a *simulation* and says so on the frame; with the camera
  * running the real MJPEG feed replaces it.
  */
-export function ExperimentsView({
-  state,
-  engine,
-  engineOffline,
-  mode,
-  cameraRunning,
-  cameraOffline,
-  cameraSending,
-  onCameraStart,
-  onCameraStop,
-  detection,
-  attendance,
-  connected,
-  busy,
-  onStart,
-  onStop,
-  onEngineStart,
-  onEngineStop,
-}: Props) {
-  const running = state.status === 'RUNNING'
-  const expected = expectedStep(state.experiment, state.currentStepIndex)
-  const total = state.experiment.steps.length
-  const done = state.completedStepIds.length
-  const progress = total > 0 ? Math.round((done / total) * 100) : 0
-  const streamUrl = cameraRunning ? CAMERA_STREAM_URL : null
-  const cameraDisabled = mode !== 'backend' || cameraSending || cameraOffline
+  export function ExperimentsView({
+    state,
+    engine,
+    engineOffline,
+    mode,
+    detection,
+    attendance,
+    connected,
+    busy,
+    onStart,
+    onStop,
+    onEngineStart,
+    onEngineStop,
+  }: Props) {
+    const running = state.status === 'RUNNING'
+    const expected = expectedStep(state.experiment, state.currentStepIndex)
+    const total = state.experiment.steps.length
+    const done = state.completedStepIds.length
+    const progress = total > 0 ? Math.round((done / total) * 100) : 0
+    // Camera state comes from the one controller, not from props.
+    const { streamActive: cameraRunning } = useCamera()
+  
   const timeline = useMemo(() => basEventEntries(state.log, 50), [state.log])
   const observed = state.currentDetected
   const classification = state.lastClassification
@@ -231,15 +227,13 @@ export function ExperimentsView({
           scroll={false}
           right={
             <span className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">
-              {streamUrl ? 'CAM-01 live' : 'canvas simulation'}
+              {cameraRunning ? 'CAM-01 live' : 'canvas simulation'}
             </span>
           }
         >
           <div className="flex min-h-0 flex-1 flex-col gap-2">
             {cameraRunning ? (
               <CameraStage
-                running
-                offline={false}
                 detections={detection.result?.detections ?? []}
                 unknownDetections={detection.result?.unknownDetections ?? []}
                 frameWidth={detection.result?.frameWidth ?? null}
@@ -250,41 +244,16 @@ export function ExperimentsView({
                     .map(w => w.instanceId),
                 )}
                 fill
-                disabled={cameraDisabled}
-                onStart={onCameraStart}
-                onStop={onCameraStop}
               />
             ) : (
               <>
                 <LiveFeed state={state} />
                 {mode === 'backend' ? (
-                  <div>
-                    <div className="mb-1 grid grid-cols-2 gap-1.5">
-                      <button
-                        type="button"
-                        onClick={onCameraStart}
-                        disabled={cameraDisabled}
-                        className="btn-outline px-2 py-1.5"
-                      >
-                        <span className="msym text-base leading-none">videocam</span>
-                        CAM-01 ON
-                      </button>
-                      <button
-                        type="button"
-                        onClick={onCameraStop}
-                        disabled={cameraDisabled || !cameraRunning}
-                        className="btn-outline px-2 py-1.5"
-                      >
-                        <span className="msym text-base leading-none">videocam_off</span>
-                        CAM OFF
-                      </button>
-                    </div>
-                    <p className="font-mono text-[10px] leading-snug text-on-surface-variant">
-                      {cameraOffline
-                        ? 'Backend unreachable — camera controls unavailable.'
-                        : 'The canvas above is a simulation of the procedure. Start CAM-01 to replace it with the real feed.'}
-                    </p>
-                  </div>
+                  /* The transport is the shared one, rendered outside the video
+                     branch. This view used to carry its own third copy of the
+                     buttons, disabled whenever the backend was briefly
+                     unreachable. */
+                  <CameraControls />
                 ) : (
                   <p className="font-mono text-[10px] leading-snug text-on-surface-variant">
                     Local simulator mode: the canvas is the feed. Switch to Backend in the header to

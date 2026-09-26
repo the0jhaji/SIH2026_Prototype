@@ -217,6 +217,20 @@
     overscroll-behavior: contain;
   }
 
+  /* ── Camera fullscreen ─────────────────────────────────────────────
+     A class swap on the *existing* camera container, not a second render
+     tree. The <img src="/api/camera/stream"> and its overlay canvas stay
+     mounted, so entering or leaving fullscreen opens no new connection,
+     restarts nothing, and the overlay keeps the rect it measured. */
+  .camera-viewport-fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: #000;
+    padding: var(--page-pad);
+    gap: var(--grid-gap);
+  }
+
   /* A row that claims the remaining viewport height. Its children are
      grid items that must be allowed to shrink, otherwise their content
      pushes the page into a second scrollbar. */

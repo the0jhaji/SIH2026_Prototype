@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ExperimentMode } from '../hooks/useExperiment'
-import type { CameraInfo } from '../domain/camera'
+import { CAMERA_PHASE_LABEL, type CameraInfo, type CameraPhase } from '../domain/camera'
 import type { DetectionStatus } from '../domain/detection'
 import type { SafetySnapshot } from '../domain/safety'
 import { MISSION_COLORS } from '../domain/safety'
@@ -17,7 +17,7 @@ interface Props {
   connected: boolean
   busy: boolean
   camera: CameraInfo | null
-  cameraOffline: boolean
+  cameraPhase: CameraPhase
   detection: DetectionStatus | null
   detectionOffline: boolean
   safety: SafetySnapshot | null
@@ -35,7 +35,7 @@ export function Header({
   connected,
   busy,
   camera,
-  cameraOffline,
+  cameraPhase,
   detection,
   detectionOffline,
   safety,
@@ -52,7 +52,11 @@ export function Header({
     return () => window.clearInterval(t)
   }, [])
 
-  const camRunning = camera?.running === true && !cameraOffline
+  // The header reports the canonical camera phase rather than inventing its own
+  // "offline"/"off" wording, so the chip agrees with the camera page and the
+  // Mission page. `stale` is deliberately not `running` — a late feed is not a
+  // healthy one — but it is also not an error.
+  const camRunning = cameraPhase === 'live'
   const detectionOk = detection?.inferenceStatus === 'ok' && !detectionOffline
   const mission = safetyOffline ? 'OFFLINE' : (safety?.mission_state ?? 'STANDBY')
   const missionOk = !safetyOffline && (safety?.monitoring ?? false) && !safety?.feed_stale
@@ -107,7 +111,7 @@ export function Header({
         />
         <Chip
           label="Camera"
-          value={camRunning ? `${camera.width}×${camera.height}` : 'offline'}
+          value={camRunning && camera ? `${camera.width}×${camera.height}` : CAMERA_PHASE_LABEL[cameraPhase]}
           running={camRunning}
           accent="secondary"
         />

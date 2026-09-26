@@ -517,8 +517,15 @@ export function LiveCameraFeed({
         }}
         className={`block ${
           fill
-            ? `absolute inset-0 h-full w-full object-${fit}`
-            : `h-auto w-full object-${fit}`
+            ? // Written out rather than `object-${fit}`: Tailwind scans source
+              // text, so an interpolated class name is never generated and the
+              // rule silently does not exist in the build.
+              fit === 'cover'
+              ? 'absolute inset-0 h-full w-full object-cover'
+              : 'absolute inset-0 h-full w-full object-contain'
+            : fit === 'cover'
+              ? 'h-auto w-full object-cover'
+              : 'h-auto w-full object-contain'
         }`}
       />
       {content && (
@@ -563,15 +570,17 @@ export function LiveCameraFeed({
           ))}
         </div>
       )}
+      {/* Telemetry overlay. Positioned inside the measured box, so it can never
+          change the video's dimensions. Shown in production as well as dev — it
+          was gated behind `import.meta.env.DEV`, which meant the frame size and
+          the known/unknown counts vanished from the built dashboard. */}
       <span className="pointer-events-none absolute left-2 top-2 z-30 bg-black/55 px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-wide text-slate-200">
-        CAM-01 · LIVE FEED
+        CAM-01 · LIVE
       </span>
-      {import.meta.env.DEV && (
-        <span className="pointer-events-none absolute right-2 top-2 z-30 bg-black/70 px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-wide text-amber-300">
-          {frame ? `Frame: ${frame.width} x ${frame.height}` : 'Frame: —'} · Known: {detections.length} ·
-          Unknown: {unknownDetections.length}
-        </span>
-      )}
+      <span className="pointer-events-none absolute right-2 top-2 z-30 bg-black/70 px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-wide text-amber-300">
+        {frame ? `Frame: ${frame.width} × ${frame.height}` : 'Frame: —'} · Known: {detections.length} ·
+        Unknown: {unknownDetections.length}
+      </span>
     </div>
   )
 }

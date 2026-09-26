@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { CAMERA_STREAM_URL } from '../domain/camera'
+import { CAMERA_PHASE_COLOR, CAMERA_PHASE_LABEL } from '../domain/camera'
 import {
   BOX_COLORS,
   CLASS_COLOR,
@@ -8,10 +8,12 @@ import {
   unattendedIdsFrom,
   type Detection,
 } from '../domain/detection'
-import { LiveCameraFeed } from '../components/LiveFeed'
+import { CameraControls } from '../components/CameraControls'
+import { CameraViewport } from '../components/CameraStage'
 import { EmptyState, Panel, StatTile } from './ui'
 import { PageShell, Timeline } from './layout'
 import { attendanceEventEntries, basEventEntries, relativeAge, safetyEventEntries, stateColor } from './helpers'
+import { useCamera } from '../hooks/cameraController'
 import type { SafetyCommonProps } from './props'
 
 /** Stage duration for the trace panel. `—` means the stage never ran, not 0 ms. */
@@ -49,22 +51,30 @@ const MONITOR_ROW = '0 0 11%'
  */
 export function CameraView({
   state,
-  camera,
-  cameraRunning,
-  cameraOffline,
-  onCameraStart,
-  onCameraStop,
   safety,
   detection,
   attendance,
 }: SafetyCommonProps) {
+  // The one canonical camera state. This view holds no camera booleans of its
+  // own, so it cannot disagree with any other page.
+  const { phase, streamActive } = useCamera()
   const status = detection.status
   const result = detection.result
-  const streamRunning = cameraRunning
-  const detections = streamRunning ? (result?.detections ?? []) : []
-  const unknownDetections = streamRunning ? (result?.unknownDetections ?? []) : []
-  const frameW = streamRunning ? (result?.frameWidth ?? null) : null
-  const frameH = streamRunning ? (result?.frameHeight ?? null) : null
+  const detections = streamActive ? (result?.detections ?? []) : []
+  const unknownDetections = streamActive ? (result?.unknownDetections ?? []) : []
+  const frameW = streamActive ? (result?.frameWidth ?? null) : null
+  const frameH = streamActive ? (result?.frameHeight ?? null) : null
+
+  // The AI engine reports itself. A detector error is an AI fact and must not
+  // propagate into the camera's phase.
+  const aiLabel = detection.offline
+    ? 'UNREACHABLE'
+    : status?.inferenceStatus === 'error'
+      ? 'ERROR'
+      : status?.enabled
+        ? 'RUNNING'
+        : 'IDLE'
+  const aiColor = detection.offline || status?.inferenceStatus === 'error' ? '#f87171' : status?.enabled ? '#4ade80' : '#94a3b8'
   const hazardLevels = useMemo(() => hazardLevelsFrom(safety.snapshot?.assessments), [safety.snapshot])
   const unattendedIds = useMemo(() => unattendedIdsFrom(attendance.result?.watches), [attendance])
   const allDetections = [...detections, ...unknownDetections]
@@ -89,87 +99,55 @@ export function CameraView({
           accent={snapshot?.top_hazard ? BOX_COLORS.hazard : undefined}
           right={
             <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
-              CAM-01 · {streamRunning ? 'LIVE' : 'STANDBY'} · {detections.length + unknownDetections.length}{' '}
+              CAM-01 · {CAMERA_PHASE_LABEL[phase]} · {detections.length + unknownDetections.length}{' '}
               OBJECTS
             </span>
           }
         >
-          {streamRunning ? (
-            /* The viewport is sized by its own width at the camera's real frame
-               aspect, so the picture fills it edge to edge: no letterbox, no
-               crop, and the overlay rect is the box. Nothing here may stretch
-               the box vertically — that is what `aspect` exists to prevent. */
-            <div className="flex w-full flex-col">
-              <div className="relative w-full">
-                <LiveCameraFeed
-                  streamUrl={CAMERA_STREAM_URL}
-                  detections={detections}
-                  unknownDetections={unknownDetections}
-                  frameWidth={frameW}
-                  frameHeight={frameH}
-                  hazardLevels={hazardLevels}
-                  unattendedIds={unattendedIds}
-                  fill
-                  fit="cover"
-                  aspect={frameW && frameH ? `${frameW} / ${frameH}` : '16 / 9'}
-                />
+          {/*
+            The viewport and the transport are SIBLINGS and neither is inside a
+            `cameraRunning` branch. They used to live inside it, which meant that
+            stopping the camera removed the CAM ON button along with the video and
+            left this page — the one place you go to start the camera — with no way
+            to start it. The controls cannot be lost now: nothing below depends on
+            whether a frame exists.
+          */}
+          <div className="flex w-full flex-col">
+            <CameraViewport
+              detections={detections}
+              unknownDetections={unknownDetections}
+              frameWidth={frameW}
+              frameHeight={frameH}
+              hazardLevels={hazardLevels}
+              unattendedIds={unattendedIds}
+              fill
+              aspect={frameW && frameH ? `${frameW} / ${frameH}` : '16 / 9'}
+            />
+            <CameraControls className="mt-2" />
 
-                  {/* Real telemetry only — every field is a live backend value. */}
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 px-2 pb-1 font-mono text-[10px] uppercase tracking-wider text-slate-300">
-                    <span className="flex gap-3">
-                      <span style={{ color: status?.enabled ? '#4ade80' : '#f97316' }}>
-                        INF {status?.enabled ? 'ONLINE' : 'OFFLINE'}
-                      </span>
-                      <span>FPS {status ? status.actualFps.toFixed(1) : '—'}</span>
-                      <span>LAT {result?.inferenceMs != null ? `${result.inferenceMs}ms` : '—'}</span>
-                      <span>TRK {attendance.status?.objects ?? 0}</span>
-                    </span>
-                    <span>
-                      {frameW && frameH ? `${frameW}×${frameH}` : '—'} · {status?.detector ?? '—'}
-                    </span>
-                  </div>
-              </div>
-
-              {/* Transport controls, docked directly under the frame and
-                  sharing its width. */}
-              <div className="grid shrink-0 grid-cols-2 gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={onCameraStart}
-                  disabled={cameraRunning || cameraOffline}
-                  className="btn-primary"
-                >
-                  <span className="msym text-base leading-none">videocam</span>
-                  CAM ON
-                </button>
-                <button
-                  type="button"
-                  onClick={onCameraStop}
-                  disabled={!cameraRunning}
-                  className="btn-outline"
-                >
-                  <span className="msym text-base leading-none">videocam_off</span>
-                  CAM OFF
-                </button>
-              </div>
+            {/* Telemetry is a sibling of the viewport, not an overlay inside it,
+                so it can never influence the video's box — and it renders even
+                with no feed, showing `—` rather than disappearing. The camera
+                line and the AI line are deliberately separate: YOLO failing must
+                not change what the camera says about itself. */}
+            <div className="mt-1.5 flex shrink-0 items-center justify-between gap-2 font-mono text-[10px] uppercase tracking-wider text-slate-400">
+              <span className="flex gap-3">
+                <span style={{ color: CAMERA_PHASE_COLOR[phase] }}>CAM {CAMERA_PHASE_LABEL[phase]}</span>
+                <span style={{ color: aiColor }}>
+                  AI {aiLabel}
+                </span>
+                <span>FPS {status ? status.actualFps.toFixed(1) : '—'}</span>
+                <span>LAT {result?.inferenceMs != null ? `${result.inferenceMs}ms` : '—'}</span>
+                <span>TRK {attendance.status?.objects ?? 0}</span>
+              </span>
+              <span>
+                {frameW && frameH ? `${frameW}×${frameH}` : '—'} · {status?.detector ?? '—'}
+              </span>
             </div>
-          ) : (
-            <div className="flex min-h-[12rem] flex-1 items-center justify-center bg-black">
-              <EmptyState
-                icon="videocam_off"
-                title={cameraOffline ? 'Camera offline' : 'Camera stopped'}
-                description={
-                  cameraOffline
-                    ? 'The backend is not reachable, so no camera control is available.'
-                    : 'Press CAM ON to start visual monitoring. Nothing is inferred without a live frame.'
-                }
-                status={camera ? `${camera.width}×${camera.height} · ${camera.fps}fps configured` : undefined}
-                lastUpdated={camera ? 'no frames are being served' : undefined}
-              />
-            </div>
-          )}
+          </div>
         </Panel>
       </div>
+
 
       {/* ── 2. Compact AI monitoring strip ───────────────────────────── */}
       <div
@@ -207,9 +185,9 @@ export function CameraView({
             <EmptyState
               compact
               icon="search_off"
-              title={streamRunning ? 'No objects in frame' : 'Camera offline'}
+              title={streamActive ? 'No objects in frame' : 'No camera feed'}
               description={
-                streamRunning
+                streamActive
                   ? 'The detector is running but has not recognised anything in the current frame.'
                   : 'Nothing to interpret without the live feed.'
               }
@@ -371,8 +349,8 @@ export function CameraView({
             />
             <StatTile
               label="Feed"
-              value={snapshot?.feed_stale ? 'stale' : streamRunning ? 'fresh' : '—'}
-              color={snapshot?.feed_stale ? '#f97316' : streamRunning ? '#4ade80' : undefined}
+              value={phase === 'stale' ? 'stale' : streamActive ? 'fresh' : '—'}
+              color={phase === 'stale' ? '#fbbf24' : streamActive ? '#4ade80' : undefined}
             />
             <StatTile label="Monitoring" value={snapshot?.monitoring ? 'ON' : 'OFF'} />
           </div>

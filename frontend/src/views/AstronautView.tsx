@@ -9,6 +9,8 @@ import {
   severityColor,
   stateColor,
 } from './helpers'
+import { useCamera } from '../hooks/cameraController'
+import { CAMERA_PHASE_LABEL } from '../domain/camera'
 import type { SafetyCommonProps } from './props'
 
 /**
@@ -21,12 +23,11 @@ import type { SafetyCommonProps } from './props'
  * monitoring state that would be needed to change that.
  */
 export function AstronautView({
-  cameraRunning,
-  cameraOffline,
   safety,
   detection,
   attendance,
 }: SafetyCommonProps) {
+  const { phase: cameraPhase, streamActive: cameraRunning } = useCamera()
   const snapshot = safety.snapshot
   const box = snapshot?.astronaut_box ?? null
   const emergency = snapshot?.emergency ?? null
@@ -187,7 +188,7 @@ export function AstronautView({
                     ? 'The feed is stale (camera stopped). The last known scene is retained and nothing new is claimed.'
                     : 'The camera is active but no crew member is currently visible.'
                 }
-                status={cameraOffline ? 'Camera offline' : cameraRunning ? 'Camera live' : 'Camera stopped'}
+                status={CAMERA_PHASE_LABEL[cameraPhase]}
                 lastUpdated={
                   snapshot?.timestamp ? `Last seen ${formatTimestamp(snapshot.timestamp)}` : undefined
                 }
@@ -199,7 +200,7 @@ export function AstronautView({
             <div className="grid grid-cols-2 gap-[var(--row-pad)] sm:grid-cols-4">
               <StatTile
                 label="Camera"
-                value={cameraOffline ? 'offline' : cameraRunning ? 'live' : 'stopped'}
+                value={CAMERA_PHASE_LABEL[cameraPhase]}
                 color={cameraRunning ? MISSION_COLORS.NORMAL : '#64748b'}
               />
               <StatTile

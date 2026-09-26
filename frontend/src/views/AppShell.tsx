@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useCamera } from '../hooks/useCamera'
+import { useCamera } from '../hooks/cameraController'
 import { useDetection } from '../hooks/useDetection'
 import { useExperiment } from '../hooks/useExperiment'
 import { useExperimentEngine } from '../hooks/useExperimentEngine'
@@ -25,12 +25,18 @@ import { VIEW_DENSITY, type ViewKey } from './nav'
  * `position: fixed` overlays, and the page area is the only scrolling
  * region. Previously the body scrolled under fixed chrome, so every view
  * was a short strip at the top of an otherwise empty window.
+ *
+ * Note what is NOT here: any camera state. The shell used to call `useCamera`
+ * and hand `camera`/`cameraRunning`/`cameraOffline`/`onCameraStart`/
+ * `onCameraStop` to every view as props. That made each view responsible for
+ * interpreting the camera, and they interpreted it differently. Views now read
+ * the one controller themselves, and the shell only reads it for the header.
  */
 export default function AppShell() {
   const [view, setView] = useState<ViewKey>('mission')
   const { state, mode, connected, busy, start, stop, setMode, safetyMessage, clearSafetyMessage } =
     useExperiment()
-  const camera = useCamera(mode)
+  const camera = useCamera()
   const detection = useDetection(mode)
   const safety = useSafety(mode)
   const attendance = useAttendance(mode)
@@ -46,19 +52,11 @@ export default function AppShell() {
     }
   }, [safetyMessage, safety, attendance, engine, clearSafetyMessage])
 
-  const cameraRunning = camera.info?.running === true
-  const cameraOffline = camera.offline
-
   const common = {
     state,
     engine: engine.snapshot,
     engineOffline: engine.offline,
     mode,
-    camera: camera.info,
-    cameraRunning,
-    cameraOffline,
-    onCameraStart: camera.start,
-    onCameraStop: camera.stop,
     safety,
     attendance,
     detection,
@@ -75,7 +73,7 @@ export default function AppShell() {
         connected={connected}
         busy={busy}
         camera={camera.info}
-        cameraOffline={cameraOffline}
+        cameraPhase={camera.phase}
         detection={detection.status}
         detectionOffline={detection.offline}
         safety={safety.snapshot}
@@ -97,7 +95,6 @@ export default function AppShell() {
         {view === 'experiments' && (
           <ExperimentsView
             {...common}
-            cameraSending={camera.sending}
             connected={connected}
             busy={busy}
             onStart={start}
