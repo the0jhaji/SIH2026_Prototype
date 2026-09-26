@@ -116,6 +116,21 @@ def create_app(
     manager = ConnectionManager()
     store = LogStore()
 
+    # --- Diagnostics gates, applied from config before anything can emit -----
+    # `detect_log` defaults to ON so that tests and one-off tracing work out of
+    # the box. Production must be OFF unless asked for, and a service that is
+    # disabled never constructs far enough to configure the emitter itself — so
+    # the app sets both gates here, exactly once, from the same env vars the
+    # service reports. Two independent switches, one emitter:
+    #   DETECT_LOG_ENABLED  -> legacy per-frame file log (expensive)
+    #   DETECT_TRACE_LEVEL  -> structured events + stage timings (cheap)
+    from ai.detection import detect_log
+
+    detect_log.set_enabled(config.DETECT_LOG_ENABLED)
+    detect_log.set_level(config.DETECT_TRACE_LEVEL)
+    if config.DETECT_TRACE_LEVEL.strip().upper() != "OFF":
+        detect_log.set_buffer_size(config.DETECT_TRACE_BUFFER)
+
     # --- Experiment state engine (rich lifecycle + temporal confirmation) ---
     voice_service = VoiceAlertService()
     experiment_logger = ExperimentLogger()
@@ -157,7 +172,15 @@ def create_app(
             iou_threshold=config.DETECTION_IOU_THRESHOLD,
             poll_ms=config.DETECTION_POLL_MS,
             target_fps=config.DETECTION_FPS,
-            trace=config.DETECT_LOG_ENABLED,
+            # Two independent diagnostics switches, one emitter:
+            #   DETECT_TRACE_LEVEL  -> structured events + stage timings (cheap)
+            #   DETECT_LOG_ENABLED  -> legacy per-frame file log (expensive)
+            # Keeping them apart means asking for trace data does not switch on
+            # the per-candidate log writes that cost ~28ms/frame.
+            trace=config.DETECT_TRACE_LEVEL.strip().upper() != "OFF",
+            trace_level=config.DETECT_TRACE_LEVEL,
+            trace_buffer=config.DETECT_TRACE_BUFFER,
+            text_log=config.DETECT_LOG_ENABLED,
             scene=config.MOCK_SCENE or None,
             cv_threads=config.DETECTION_CV_THREADS if config.DETECTION_CV_THREADS > 0 else None,
             debounce_frames=config.DETECTION_DEBOUNCE_FRAMES,
@@ -462,7 +485,36 @@ def create_app(
 
     @app.get("/api/detection/status")
     async def detection_status() -> dict:
-        return detection_service.status()
+        payload = detection_service.status()
+        # Compact, fixed-size diagnostics only — never the event history, which
+        # this route is polled for every second. Absent entirely when tracing is
+        # off, so a normal response is byte-for-byte what it was before.
+        if payload.get("traceEnabled"):
+            from ai.detection import detect_log
+
+            payload["trace"] = detect_log.stats()
+        return payload
+
+    @app.get("/api/detection/trace")
+    async def detection_trace(limit: int = 50) -> dict:
+        """Bounded recent structured trace events, newest last.
+
+        Separate from /status so the frequently-polled status payload stays small
+        and so the history can be fetched on demand (or not at all).
+        """
+        from ai.detection import detect_log
+
+        state = detection_service.trace_state()
+        # Clamped server-side: the client cannot ask for an unbounded history.
+        cap = max(1, min(int(limit), detect_log.TRACE_BUFFER_MAX))
+        return {
+            # Same source as /status, so the two can never disagree.
+            "enabled": state["enabled"],
+            "level": state["level"],
+            "count": len(detect_log.recent(cap)),
+            "limit": cap,
+            "events": detect_log.recent(cap),
+        }
 
     @app.get("/api/detections")
     async def detections() -> dict:

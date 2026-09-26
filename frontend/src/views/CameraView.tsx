@@ -18,9 +18,13 @@ interface Props extends SafetyCommonProps {
   detectionResult: DetectionResult | null
 }
 
+/** Stage duration for the trace panel. `—` means the stage never ran, not 0 ms. */
+function fmtMs(value: number | null | undefined): string {
+  return value == null ? '—' : `${value.toFixed(1)}ms`
+}
+
 const STATE_TONE: Record<string, string> = {
-  UNATTENDED: 'text-error border-error/50 bg-error/10',
-  RELEASED: 'text-warning border-warning/50 bg-warning/10',
+  UNATTENDED: 'text-error border-error/50 bg-error/10',  RELEASED: 'text-warning border-warning/50 bg-warning/10',
   ATTENDED: 'text-tertiary border-outline-variant/40 bg-surface-container-low',
   OBJECT_INSIDE_BOX: 'text-primary border-primary/40 bg-primary/10',
 }
@@ -213,7 +217,7 @@ export function CameraView({
             />
             <StatTile
               label="Trace"
-              value={detectionStatus?.traceEnabled ? 'ON (verbose)' : 'OFF'}
+              value={detectionStatus?.traceEnabled ? `ON (${detectionStatus.traceLevel ?? detectionStatus.trace?.level ?? 'on'})` : 'OFF'}
             />
             <StatTile
               label="Last"
@@ -226,6 +230,37 @@ export function CameraView({
             </p>
           )}
         </Panel>
+
+        {detectionStatus?.traceEnabled && detectionStatus.trace && (
+          <Panel title="Trace">
+            <div className="mb-2 grid grid-cols-3 gap-2">
+              <StatTile label="Level" value={detectionStatus.traceLevel ?? detectionStatus.trace.level} />
+              <StatTile label="Events" value={String(detectionStatus.trace.eventsTotal)} />
+              <StatTile
+                label="Rate"
+                value={`${detectionStatus.trace.eventsPerSecond.toFixed(1)}/s`}
+              />
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <StatTile label="capture" value={fmtMs(detectionStatus.trace.captureMs)} />
+              <StatTile label="yolo" value={fmtMs(detectionStatus.trace.yoloMs)} />
+              <StatTile label="unknown" value={fmtMs(detectionStatus.trace.unknownDetectorMs)} />
+              <StatTile label="tracker" value={fmtMs(detectionStatus.trace.trackerMs)} />
+              <StatTile label="openclip" value={fmtMs(detectionStatus.trace.openclipMs)} />
+              <StatTile label="hazard" value={fmtMs(detectionStatus.trace.hazardMs)} />
+            </div>
+            <p className="mt-2 font-mono text-[11px] text-on-surface-variant">
+              total {fmtMs(detectionStatus.trace.lastPipelineMs)} · buffer{' '}
+              {detectionStatus.trace.bufferSize}/{detectionStatus.trace.bufferCapacity} · history at
+              /api/detection/trace
+            </p>
+            {detectionStatus.trace.errors > 0 && (
+              <p className="mt-2 border border-error/40 bg-error/10 px-2 py-1 font-mono text-[11px] text-error">
+                TRACER ERROR: {detectionStatus.trace.errors} failure(s) — diagnostics are incomplete
+              </p>
+            )}
+          </Panel>
+        )}
 
         <Panel title="Model">
           <p className="mt-1 font-mono text-[11px] uppercase tracking-wider text-on-surface-variant">

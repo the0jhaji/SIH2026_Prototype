@@ -74,6 +74,18 @@ ATTENDED = "ATTENDED"
 
 _STATES = (UNKNOWN, POSSIBLY_HELD, HELD, RELEASED, UNATTENDED, GONE, ATTENDED)
 
+#: Attendance state -> structured trace event name. One vocabulary shared with
+#: the tracker so an object is followed by the same event names end to end.
+_TRANSITION_EVENTS = {
+    UNKNOWN: "TRACK_DETECTED",
+    POSSIBLY_HELD: "TRACK_POSSIBLY_HELD",
+    HELD: "TRACK_HELD",
+    RELEASED: "TRACK_RELEASED",
+    UNATTENDED: "TRACK_UNATTENDED",
+    GONE: "TRACK_REMOVED",
+    ATTENDED: "TRACK_ATTENDED",
+}
+
 #: Object->watch IoU floor for re-attaching a known-class detection to its watch.
 #: Mirrors the tracker's own match floor so both layers agree on "same object".
 _WATCH_IOU = 0.3
@@ -178,7 +190,32 @@ class ObjectWatch:
         self.state = state
         self.frames_in_state = 0
         self._append_transition(state, now, reason)
+        self._trace_transition(previous, state, now, reason)
         return {"instance_id": self.instance_id, "from": previous, "to": state, "ts": now, "reason": reason}
+
+    def _trace_transition(self, previous: str, state: str, now: int, reason: str) -> None:
+        """Record the state change as a structured trace event.
+
+        Already change-only (the caller returns early on an unchanged state), so
+        this costs one buffer append per real transition and never one per frame.
+        HELD / RELEASED / UNATTENDED map onto the TRACK_* vocabulary the tracker
+        and the alert chain already use, so one object is followed by one name
+        across the whole pipeline. ``detect_log.event`` never raises.
+        """
+        from ai.detection import detect_log
+
+        detect_log.event(
+            _TRANSITION_EVENTS.get(state, "TRACK_STATE_CHANGED"),
+            level=detect_log.TRACE_INFO,
+            instance_id=self.instance_id,
+            class_name=self.class_name,
+            previous_state=previous,
+            new_state=state,
+            reason=reason,
+            frames_in_state=self.frames_in_state,
+            person_free_ms=self.person_free_ms,
+            stationary_seconds=round(self.person_free_ms / 1000.0, 2),
+        )
 
 
 def _box(d: dict) -> tuple[int, int, int, int]:

@@ -9,9 +9,12 @@ Runs on a stub/injected detection feed or the mock detector — never a physical
 camera or real model weights.
 """
 
+import asyncio
 import json
 import time
 from pathlib import Path
+
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -32,6 +35,19 @@ EXP = load_experiment(EXPERIMENTS / "box_sequence.json")
 FAST_SCRIPT = [{"delay_ms": 5, "activity": "PICK_MAIN_BOX", "confidence": 0.96}]
 
 MOCK_SETTINGS = CameraSettings(mock=True, width=320, height=240, fps=120)
+
+#: Safety services built by these tests. They poll a detection thread for the
+#: whole pytest session otherwise, which starves later suites and leaks work.
+_STARTED: list = []
+
+
+@pytest.fixture(autouse=True)
+def _stop_started_safety_services():
+    yield
+    for svc in _STARTED:
+        asyncio.run(svc.stop())
+    _STARTED.clear()
+
 
 from ai.detection.detector import create_detector  # noqa: E402
 
@@ -115,6 +131,7 @@ def build_safety_client(
         safety_transport=transport,
     )
     client = TestClient(app)
+    _STARTED.append(app.state.safety_service)
     return client, incidents, transport
 
 

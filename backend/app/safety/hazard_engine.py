@@ -42,6 +42,11 @@ def risk_level_for(score: float) -> RiskLevel:
     return "SAFE"
 
 
+#: Severity ordering, used to tell an escalation from a de-escalation. Mirrors
+#: the boundaries in `risk_level_for` rather than re-deriving them.
+_LEVEL_ORDER = {"SAFE": 0, "CAUTION": 1, "WARNING": 2, "CRITICAL": 3}
+
+
 class HazardAssessment(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -131,6 +136,9 @@ class HazardEngine:
         self._gone: Dict[str, int] = {}
         self._centers: Dict[str, Deque[tuple[float, float]]] = {}
         self._last_scene: Optional[SceneAssessment] = None
+        #: Last reported risk per object, used to emit RISK_CHANGED only on an
+        #: actual change instead of one event per frame per object.
+        self._last_risk: Dict[str, tuple[str, float]] = {}
 
     # -------------------------------------------------------------- tracking
 
@@ -139,6 +147,7 @@ class HazardEngine:
         self._gone.clear()
         self._centers.clear()
         self._last_scene = None
+        self._last_risk.clear()
 
     def _tick_tracker(self, seen: set[str]) -> None:
         for name in set(self._persist):
@@ -213,13 +222,73 @@ class HazardEngine:
     # -------------------------------------------------------------- assess
 
     def assess(self, payload: Optional[dict], now_ms: Optional[int] = None) -> SceneAssessment:
+        from ai.detection import detect_log
+
         now = now_ms if now_ms is not None else int(time.time() * 1000)
         if not payload or not payload.get("enabled") or payload.get("inferenceStatus") != "ok":
             return self._stale_scene(now)
         last_inf = payload.get("lastInferenceMs")
         if last_inf is None or now - int(last_inf) > self.stale_after_ms:
             return self._stale_scene(now)
-        return self._assess_fresh(payload, now)
+        started = time.perf_counter()
+        scene = self._assess_fresh(payload, now)
+        self._trace_risk(scene, started, detect_log)
+        return scene
+
+    def _trace_risk(self, scene: SceneAssessment, started: float, detect_log) -> None:
+        """Emit RISK_CREATED / RISK_CHANGED / HAZARD_CLEARED, plus a duration.
+
+        Change-only: the previous (risk_level, rounded risk_score) per object is
+        kept, so a steady scene produces no events at all. A stale scene is never
+        reported as a clear — the engine must not invent a resolution from a feed
+        that stopped delivering.
+        """
+        if not detect_log.trace_enabled():
+            return
+        detect_log.stage("hazard_ms", (time.perf_counter() - started) * 1000.0)
+        if scene.stale:
+            return
+        current: Dict[str, tuple[str, float]] = {}
+        for a in scene.assessments:
+            # Coarse on purpose: microgravity drift moves the score every frame,
+            # and an event per frame per object is exactly what this layer must
+            # not do.
+            score = round(a.risk_score, 1)
+            current[a.object] = (a.risk_level, score)
+            previous = self._last_risk.get(a.object)
+            if previous == current[a.object]:
+                continue
+            if previous is None:
+                event = "RISK_CREATED"
+            elif a.risk_level != previous[0] and (
+                _LEVEL_ORDER.get(a.risk_level, 0) > _LEVEL_ORDER.get(previous[0], 0)
+            ):
+                event = "HAZARD_ESCALATED"
+            else:
+                event = "RISK_CHANGED"
+            detect_log.event(
+                event,
+                instance_id=a.object,
+                risk_score=int(round(score * 100)),
+                risk_level=a.risk_level,
+                hazard=bool(a.hazard),
+                confirmed=bool(a.confirmed),
+                previous_state=previous[0] if previous else None,
+                new_state=a.risk_level,
+                # The assessment model carries a single `reason` string; the trace
+                # reports it verbatim rather than inventing a list.
+                reason=a.reason,
+            )
+        for name in self._last_risk:
+            if name not in current:
+                previous = self._last_risk[name]
+                detect_log.event(
+                    "HAZARD_CLEARED",
+                    instance_id=name,
+                    previous_state=previous[0],
+                    new_state="SAFE",
+                )
+        self._last_risk = current
 
     def _stale_scene(self, now: int) -> SceneAssessment:
         if self._last_scene is not None:

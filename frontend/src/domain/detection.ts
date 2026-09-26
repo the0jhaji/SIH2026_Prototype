@@ -33,6 +33,34 @@ export interface Detection {
 
 export type DetectionInferenceStatus = 'disabled' | 'idle' | 'ok' | 'error'
 
+/**
+ * Compact structured-trace summary from `ai/detection/detect_log.py`, embedded in
+ * the status payload only while tracing is enabled. Latest duration per pipeline
+ * stage plus a bounded event rate — the history itself lives behind
+ * `GET /api/detection/trace` so this per-second payload stays small.
+ *
+ * `errors` counts failures *of the tracer itself*. It must be 0; a non-zero
+ * value means the diagnostics are silently broken, which is worse than no trace.
+ */
+export interface TraceStats {
+  level: string
+  enabled: boolean
+  textLogEnabled?: boolean
+  bufferSize: number
+  bufferCapacity: number
+  eventsTotal: number
+  eventsPerSecond: number
+  errors: number
+  lastPipelineMs: number | null
+  captureMs: number | null
+  yoloMs: number | null
+  unknownDetectorMs: number | null
+  trackerMs: number | null
+  openclipMs: number | null
+  hazardMs: number | null
+  stages?: Record<string, number>
+}
+
 export interface DetectionStatus {
   enabled: boolean
   detector: string | null
@@ -62,8 +90,14 @@ export interface DetectionStatus {
   inferenceCount: number
   /** Camera frames dropped because the rate gate was not due yet (never queued). */
   skippedForRate: number
-  /** Verbose per-candidate detection trace log (off by default; expensive). */
+  /** Structured ring-buffer trace is on (cheap; `DETECT_TRACE_LEVEL != OFF`). */
   traceEnabled: boolean
+  /** Configured trace verbosity; `OFF` when tracing is disabled. */
+  traceLevel?: string
+  /** Legacy per-candidate text log (expensive, separate switch, off by default). */
+  textLogEnabled?: boolean
+  /** Present only while `traceEnabled` — see {@link TraceStats}. */
+  trace?: TraceStats
   error: string | null
 }
 

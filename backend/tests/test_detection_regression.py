@@ -89,6 +89,25 @@ class StubDetector:
         pass
 
 
+@pytest.fixture(autouse=True)
+def _stop_built_services():
+    """Stop the services these tests build.
+
+    The DetectionService constructor starts its worker thread, so every test that
+    calls `_build` leaks a live inference loop into the rest of the pytest
+    process. Those threads keep polling, share the process-wide stage timings and
+    diagnostics, and burn a CPU core each — which made unrelated suites flaky.
+    """
+    yield
+    for svc in _BUILT:
+        svc.stop()
+    _BUILT.clear()
+
+
+#: Services created by `_build`, stopped by the fixture above.
+_BUILT: list[DetectionService] = []
+
+
 def _build(
     known_frames: list[list[Detection]],
     unknown_enabled: bool = True,
@@ -108,6 +127,7 @@ def _build(
         unknown_enabled=unknown_enabled,
         unknown_overlap_iou=overlap_iou,
     )
+    _BUILT.append(svc)
     return svc, camera
 
 

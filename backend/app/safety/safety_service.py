@@ -76,6 +76,7 @@ class SafetyService:
         self._last_snapshot: Optional[dict] = None
         self._dbg_hazards: dict = {}
         self._dbg_last_state: Optional[str] = None
+        self._dbg_stale_reported = False
 
     # ----------------------------------------------------------------- events
 
@@ -189,7 +190,9 @@ class SafetyService:
         alert_events: List[dict] = []
         signals = self._alert_signals(scene, emergency)
         handled_ids: set[str] = set()
-        for alert in self.alerts.update(signals, now):
+        touched = self.alerts.update(signals, now)
+        self._dbg_alerts(touched)
+        for alert in touched:
             if alert.id in handled_ids:
                 continue
             handled_ids.add(alert.id)
@@ -248,6 +251,56 @@ class SafetyService:
         if new_state != self._dbg_last_state:
             self._dbg_last_state = new_state
             detect_log.dbg_info("STATE_CHANGE", f"[safety] mission_state={new_state}")
+            detect_log.event(
+                "SAFETY_STATE_CHANGED",
+                instance_id=None,
+                previous_state=None,
+                new_state=new_state,
+                overall_risk_level=scene.overall_risk_level,
+            )
+        if not detect_log.trace_enabled():
+            return
+        # Stale feed: report it once as a diagnostic, never as a resolution. The
+        # monitor must not look calmer than it is because the camera stopped.
+        if scene.stale and not self._dbg_stale_reported:
+            self._dbg_stale_reported = True
+            detect_log.event(
+                "DETECTION_STALE",
+                level=detect_log.TRACE_WARN,
+                reason="no_fresh_inference",
+                state=self.monitor.state,
+            )
+        elif not scene.stale:
+            self._dbg_stale_reported = False
+
+    def _dbg_alerts(self, alerts: list) -> None:
+        """Structured trace for alerts actually raised/escalated/resolved.
+
+        Driven by the manager's own ``touched`` list, which is already
+        change-only by construction (a persistent hazard is not re-emitted every
+        tick), so this is one event per real alert transition.
+        """
+        try:
+            from ai.detection import detect_log
+        except Exception:  # noqa: BLE001 - debug logging is best-effort
+            return
+        for alert in alerts:
+            if alert.resolved:
+                event = "ALERT_CLEARED"
+            elif alert.created_at == alert.updated_at:
+                event = "ALERT_RAISED"
+            else:
+                event = "ALERT_ESCALATED"
+            detect_log.event(
+                event,
+                instance_id=alert.object or alert.key,
+                alert_id=alert.id,
+                key=alert.key,
+                level=alert.level,
+                hazard_type=alert.hazard_type,
+                risk_score=int(round((alert.risk_score or 0.0) * 100)),
+                reason=alert.message,
+            )
 
     def _ev_kwargs(self, ev: dict) -> dict:
         extra = {k: v for k, v in ev.items() if k not in {"ts"}}

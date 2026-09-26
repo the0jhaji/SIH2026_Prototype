@@ -39,9 +39,16 @@ def debug_log(tmp_path: Path) -> Path:
         logger.removeHandler(handler)
     detect_log._setup_done = False
     detect_log.take_counters()
+    # The emitter defaults to ON for tests, but the app now applies the production
+    # config at startup (OFF), so an earlier suite that built an app would leave
+    # the singleton gated off. These tests are about the emitter itself, so they
+    # turn it on explicitly instead of depending on suite ordering.
+    was_enabled = detect_log.text_enabled()
+    detect_log.set_enabled(True)
     target = detect_log.ensure_setup(root=str(tmp_path))
     assert isinstance(logger.handlers[0], logging.FileHandler)
     yield target
+    detect_log.set_enabled(was_enabled)
     for handler in list(logger.handlers):
         handler.close()
         logger.removeHandler(handler)

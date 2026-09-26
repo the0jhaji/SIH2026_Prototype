@@ -132,6 +132,16 @@ class TemporalTracker:
                     f"CREATE label={t.label} class={d.class_name} conf={d.confidence:.2f} "
                     f"bbox=({float(d.x1):.0f},{float(d.y1):.0f},{float(d.x2):.0f},{float(d.y2):.0f})",
                 )
+                detect_log.event(
+                    "TRACK_CREATED",
+                    level=detect_log.TRACE_DEBUG,
+                    log=False,
+                    instance_id=t.instance_id,
+                    label=t.label,
+                    class_name=d.class_name,
+                    confidence=round(d.confidence, 4),
+                    bbox=[int(d.x1), int(d.y1), int(d.x2), int(d.y2)],
+                )
             t.conf = self._a_conf * d.confidence + (1.0 - self._a_conf) * t.conf
             t.x1 = self._a_box * d.x1 + (1.0 - self._a_box) * t.x1
             t.y1 = self._a_box * d.y1 + (1.0 - self._a_box) * t.y1
@@ -145,6 +155,17 @@ class TemporalTracker:
                     "TRACK",
                     f"PROMOTED label={t.label} class={t.class_name} conf={t.conf:.2f} "
                     f"bbox=({t.x1:.0f},{t.y1:.0f},{t.x2:.0f},{t.y2:.0f})",
+                )
+                detect_log.event(
+                    "TRACK_STABLE",
+                    level=detect_log.TRACE_DEBUG,
+                    log=False,
+                    instance_id=t.instance_id,
+                    label=t.label,
+                    class_name=t.class_name,
+                    confidence=round(t.conf, 4),
+                    seen=t.seen,
+                    bbox=[int(round(t.x1)), int(round(t.y1)), int(round(t.x2)), int(round(t.y2))],
                 )
             if t.seen >= self.debounce_frames:
                 t.confirmed = True
@@ -160,6 +181,16 @@ class TemporalTracker:
         ]
         for t in lost:
             detect_log.dbg_info("TRACK", f"LOST label={t.label} class={t.class_name}")
+            detect_log.event(
+                "TRACK_LOST",
+                level=detect_log.TRACE_DEBUG,
+                log=False,
+                instance_id=t.instance_id,
+                label=t.label,
+                class_name=t.class_name,
+                confidence=round(t.conf, 4),
+                seen=t.seen,
+            )
         self._tracks = [t for t in self._tracks if id(t) not in {id(x) for x in lost}]
         for t in self._tracks:
             if not (t.confirmed and id(t) in matched):

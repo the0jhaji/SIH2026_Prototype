@@ -8,6 +8,7 @@ produces a clear error instead of crashing" contract are covered too.
 import time
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from camera import CameraSettings
@@ -47,15 +48,32 @@ class FailingDetector:
         return None
 
 
+#: Apps built here own a live detection thread. Without an explicit stop they
+#: keep polling (and a FailingDetector keeps raising) for the rest of the pytest
+#: session, which burns CPU and pollutes process-wide diagnostics for later
+#: suites. Tests that need the service stopped mid-test still call stop().
+_STARTED_APPS: list = []
+
+
+@pytest.fixture(autouse=True)
+def _stop_started_apps():
+    yield
+    for app in _STARTED_APPS:
+        service = getattr(app.state, "detection_service", None)
+        if service is not None:
+            service.stop()
+    _STARTED_APPS.clear()
+
+
 def make_client(detector=None) -> TestClient:
-    return TestClient(
-        create_app(
-            experiment=EXP,
-            sim_script=FAST_SCRIPT,
-            camera=MOCK_SETTINGS,
-            detector=detector,
-        )
+    app = create_app(
+        experiment=EXP,
+        sim_script=FAST_SCRIPT,
+        camera=MOCK_SETTINGS,
+        detector=detector,
     )
+    _STARTED_APPS.append(app)
+    return TestClient(app)
 
 
 def start_camera(client: TestClient) -> None:

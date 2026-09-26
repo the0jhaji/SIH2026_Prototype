@@ -23,6 +23,14 @@ def _env_bool(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_int(name: str, default: int, low: int, high: int) -> int:
+    """Clamped integer env var. A typo must not take the app down at import."""
+    try:
+        return max(low, min(int(os.environ.get(name, "").strip() or default), high))
+    except (TypeError, ValueError):
+        return default
+
+
 # Camera (Phase 2). Override with CAMERA_INDEX / CAMERA_WIDTH / CAMERA_HEIGHT /
 # CAMERA_FPS / CAMERA_MOCK. Mock mode keeps the dashboard fully functional on
 # machines without a webcam. CAMERA_BACKEND selects the capture API to try
@@ -85,6 +93,19 @@ DETECTION_FPS = float(os.environ.get("DETECTION_FPS", "8"))
 # Per-candidate decode tracing. Off by default: the RAW/FILTER hooks emit one flushed
 # line per candidate above a 0.02 floor (~40-100/frame/model) and grew the log to 55MB.
 DETECT_LOG_ENABLED = _env_bool("DETECT_LOG_ENABLED")
+# Verbosity floor for the whole detection pipeline trace. Accepts
+# Structured trace verbosity: OFF/ERROR/WARN/INFO/DEBUG/TRACE; anything
+# unrecognised falls back to INFO rather than raising, because a typo in an env
+# var must not take the detector down. Independent of DETECT_LOG_ENABLED, which
+# still controls the legacy per-frame file log: trace data is in-memory and
+# cheap, that log is not.
+DETECT_TRACE_LEVEL = str(os.environ.get("DETECT_TRACE_LEVEL", "OFF")).strip().upper() or "OFF"
+# Bounded in-memory ring buffer of structured trace events served by
+# /api/detection/trace. Bounded by construction so a long unattended run cannot
+# grow memory; 0 disables the buffer while keeping stage timings in the status API.
+# Clamped to 0..500 (ai/detection/detect_log.py TRACE_BUFFER_MAX) so an
+# over-eager or mistyped value cannot turn the "bounded" buffer into a leak.
+DETECT_TRACE_BUFFER = _env_int("DETECT_TRACE_BUFFER", 200, 0, 500)
 
 # Unknown/generic object proposals (a companion to the known-class detector).
 #   - UNKNOWN_DETECTION_ENABLED: run the model-free motion-foreground proposer

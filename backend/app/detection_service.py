@@ -88,6 +88,9 @@ class DetectionService:
         poll_ms: int = 100,
         target_fps: float = 0.0,
         trace: bool = False,
+        trace_level: str = "DEBUG",
+        trace_buffer: int = 200,
+        text_log: bool = False,
         scene: str | None = None,
         cv_threads: int | None = None,
         debounce_frames: int = 2,
@@ -111,6 +114,20 @@ class DetectionService:
         self._poll_ms = max(10, poll_ms)
         self._target_fps = max(0.0, float(target_fps or 0.0))
         self._trace = bool(trace)
+        self._trace_level = str(trace_level or "DEBUG")
+        self._trace_buffer = int(trace_buffer)
+        #: Legacy verbose per-frame file log. Independent of `trace` on purpose:
+        #: it is the expensive one, so structured tracing never implies it.
+        self._text_log = bool(text_log)
+        # Apply the process-wide logging gates here, at construction, not in the
+        # worker thread: `detect_log` defaults to on so tests work, which means a
+        # service that only configured itself inside `_bootstrap` would let other
+        # threads (safety, attendance) record events before the first inference.
+        # A *disabled* service stays out of it entirely — it has no opinion about
+        # global logging and must not silence a logger another suite is using.
+        if self._enabled:
+            detect_log.set_enabled(self._text_log)
+            detect_log.set_level(self._trace_level if self._trace else "OFF")
         self._next_due = 0.0
         self._inference_count = 0
         self._skipped_for_rate = 0
@@ -136,6 +153,7 @@ class DetectionService:
         self._last_error: Optional[str] = None
         self._dbg_last_summary = time.perf_counter()
         self._dbg_last_state: tuple[int, int] | None = None
+        self._dbg_last_frame_size: tuple[int, int] | None = None
         if self._enabled:
             self._bootstrap()
 
@@ -144,7 +162,32 @@ class DetectionService:
     def _bootstrap(self) -> None:
         """Create the detector from config if none was injected, then start the
         worker thread. Failures are recorded as an ERROR status — never raised."""
-        detect_log.set_enabled(self._trace)
+        # The logging gates were already applied in __init__ so no other thread can
+        # record before the first inference. A service stopped before it finished
+        # booting must also not reconfigure them on its way out: that would
+        # resurrect tracing (or the expensive text log) for a service nobody uses.
+        if self._stop.is_set():
+            return
+        if self._trace:
+            # Buffer size is process-wide; push it only while tracing so an off
+            # service does not shrink a buffer another service is filling.
+            detect_log.set_buffer_size(self._trace_buffer)
+            detect_log.event(
+                "DETECTOR_BOOTSTRAP",
+                detector=self._kind,
+                unknown_enabled=self._unknown_enabled,
+                target_fps=self._target_fps,
+                conf_threshold=self._conf_threshold,
+            )
+            # OpenCLIP classification of unknown tracks is not implemented in this
+            # build. Reported once, honestly, so a trace reader can tell "the
+            # classifier said nothing" apart from "the classifier never ran" —
+            # unknown tracks are reported as unclassified and ASTRA continues.
+            detect_log.event(
+                "OPENCLIP_UNAVAILABLE",
+                reason="classifier_not_installed",
+                note="unknown tracks are reported unclassified; detection is unaffected",
+            )
         if self._detector is None:
             try:
                 from ai.detection.detector import create_detector
@@ -268,6 +311,13 @@ class DetectionService:
                 last_id = self._infer_once(last_id)
             except Exception as exc:  # noqa: BLE001 - keep the loop resilient
                 detect_log.dbg_error("FAIL", f"inference_error={exc}")
+                # ERROR level so a failing pipeline is visible at a low verbosity.
+                # `event` never raises, so this cannot become the failure.
+                detect_log.event(
+                    "DETECTION_FAILED",
+                    level=detect_log.TRACE_ERROR,
+                    error=str(exc)[:200],
+                )
                 logger.exception("Detection inference failed")
                 with self._lock:
                     self._last_error = f"Detection failed: {exc}"
@@ -278,7 +328,9 @@ class DetectionService:
                 self._stop.wait(0.01)
 
     def _infer_once(self, last_id: int) -> int:
+        capture_started = time.perf_counter()
         cap = self._camera.latest_capture()
+        frame_taken = time.perf_counter()
         if cap is None or cap[0] == last_id:
             return last_id
         # Rate gate: always take the NEWEST frame, never a backlog. If the camera
@@ -293,6 +345,18 @@ class DetectionService:
             self._next_due = now + (1.0 / self._target_fps)
         frame_id, frame = cap
         started = time.perf_counter()
+        tracing = detect_log.trace_enabled()
+        if tracing:
+            # FRAME is sampled, not per-frame: the frame id and size are the only
+            # things worth recording, and a new size is the interesting case.
+            size = (int(frame.shape[1]), int(frame.shape[0]))
+            if size != self._dbg_last_frame_size:
+                self._dbg_last_frame_size = size
+                detect_log.event(
+                    "FRAME_SIZE_CHANGED",
+                    frame_width=size[0],
+                    frame_height=size[1],
+                )
         detect_log.ensure_setup()
         cam = self._camera_status()
         detect_log.dbg(
@@ -300,10 +364,14 @@ class DetectionService:
             f"id={frame_id} size={frame.shape[1]}x{frame.shape[0]} "
             f"fps={cam.get('fps', '?')} camera={cam.get('status', '?')}",
         )
+        detect_started = time.perf_counter()
         raw = self._detector.detect(frame)
+        yolo_ms = (time.perf_counter() - detect_started) * 1000.0
         unknown_raw: list[Detection] = []
         if self._generic is not None:
+            unknown_started = time.perf_counter()
             proposals = self._generic.detect(frame)
+            unknown_ms = (time.perf_counter() - unknown_started) * 1000.0
             # A generic proposal is only a real "unknown" when it does NOT
             # overlap a known-class detection; suppressing here keeps the
             # unknown feed honest (a person is never also "unknown_object").
@@ -313,6 +381,15 @@ class DetectionService:
                         "UNKNOWN",
                         f"suppressed label=unknown_object conf={proposal.confidence:.2f} (overlaps known)",
                     )
+                    if tracing:
+                        detect_log.event(
+                            "UNKNOWN_PROPOSAL_SUPPRESSED",
+                            level=detect_log.TRACE_DEBUG,
+                            log=False,
+                            reason="overlaps_known",
+                            confidence=round(proposal.confidence, 4),
+                            bbox=[proposal.x1, proposal.y1, proposal.x2, proposal.y2],
+                        )
                     continue
                 unknown_raw.append(proposal)
                 detect_log.bump("unknown")
@@ -323,10 +400,29 @@ class DetectionService:
                 detect_log.dbg_info(
                     "UNKNOWN", f"accepted label=unknown_object conf={proposal.confidence:.2f}"
                 )
+        else:
+            unknown_ms = 0.0
+        tracker_started = time.perf_counter()
         stable = self._tracker.update(raw + unknown_raw)
+        tracker_ms = (time.perf_counter() - tracker_started) * 1000.0
         known_stable = [d for d in stable if d.class_name != "unknown_object"]
         unknown_stable = [d for d in stable if d.class_name == "unknown_object"]
+        if tracing:
+            # Per-stage durations, then the total. perf_counter() is ~50ns, so
+            # measuring is far cheaper than the inference being measured.
+            detect_log.stage("yolo_ms", yolo_ms)
+            detect_log.stage("unknown_detector_ms", unknown_ms)
+            detect_log.stage("tracker_ms", tracker_ms)
+            detect_log.stage("capture_ms", (frame_taken - capture_started) * 1000.0)
         elapsed_ms = int((time.perf_counter() - started) * 1000)
+        # Total spans capture + rate gate + inference, because that is the wall
+        # clock a frame actually costs the pipeline. Measured from
+        # `capture_started` (not `started`) so capture_ms + the stages reconcile
+        # to total_ms. `elapsed_ms` stays inference-only: it is what the status
+        # API reports as inferenceMs, and folding capture into it would quietly
+        # overstate how long the model took.
+        if tracing:
+            detect_log.stage("total_ms", (time.perf_counter() - capture_started) * 1000.0)
         detect_log.dbg_info(
             "YOLO",
             f"inference_ms={elapsed_ms} raw_known={len(raw)} raw_unknown={len(unknown_raw)}",
@@ -386,15 +482,64 @@ class DetectionService:
             f"raw={counters['raw']} accepted={counters['accepted']} "
             f"rejected_confidence={counters['rejected_confidence']} unknown={counters['unknown']}",
         )
+        if detect_log.trace_enabled():
+            # Already rate-limited to 1/s by the guard above, so this is a sampled
+            # diagnostic rather than a per-frame event.
+            with self._lock:
+                detections = len(self._detections)
+                unknown = len(self._unknown_detections)
+                skipped = self._skipped_for_rate
+                inference_ms = self._inference_ms
+            detect_log.event(
+                "PIPELINE_SUMMARY",
+                level=detect_log.TRACE_DEBUG,
+                log=False,
+                window_s=round(dt, 2),
+                infer_rate=round(1.0 / dt, 2),
+                known=detections,
+                unknown=unknown,
+                inference_ms=inference_ms,
+                skipped_for_rate=skipped,
+            )
 
     def _dbg_state_change(self) -> None:
-        """Emit STATE_CHANGE only when the stable feed actually changes."""
+        """Emit STATE_CHANGE only when the stable feed actually changes.
+
+        Change-only by construction: the counts are compared against the last
+        emitted pair, so a static scene emits nothing rather than one line per
+        frame. This is the seam that reports DETECTION / UNKNOWN_DETECTION
+        without turning the trace into a per-frame log.
+        """
         with self._lock:
             new = (len(self._detections), len(self._unknown_detections))
-        if new == self._dbg_last_state:
-            return
-        self._dbg_last_state = new
+            if new == self._dbg_last_state:
+                return
+            self._dbg_last_state = new
+            known = list(self._detections)
+            unknown = list(self._unknown_detections)
+            inference_ms = self._inference_ms
+            frame_size = self._frame_size
         detect_log.dbg_info("STATE_CHANGE", f"known={new[0]} unknown={new[1]}")
+        if not detect_log.trace_enabled():
+            return
+        # A single event per feed per change: the full box list is already in
+        # /api/detections, so the trace carries the identities that matter for
+        # debugging (which tracks appeared/disappeared) rather than a per-frame
+        # dump of every coordinate.
+        detect_log.event(
+            "DETECTION",
+            known=len(known),
+            unknown=len(unknown),
+            frame_width=frame_size[0] if frame_size else None,
+            frame_height=frame_size[1] if frame_size else None,
+            inference_ms=inference_ms,
+            classes=",".join(d["class_name"] for d in known) or "none",
+        )
+        detect_log.event(
+            "UNKNOWN_DETECTION",
+            unknown=len(unknown),
+            instance_ids=",".join(d.get("instance_id") or "?" for d in unknown) or "none",
+        )
 
     def _overlaps_known(self, proposal: Detection, known: list) -> bool:
         """Suppress a generic proposal that collides with a known detection.
@@ -428,6 +573,22 @@ class DetectionService:
 
     def is_enabled(self) -> bool:
         return self._enabled
+
+    def trace_state(self) -> dict:
+        """The service's own trace configuration.
+
+        Single source of truth for every API surface that reports tracing, so
+        ``/api/detection/status`` and ``/api/detection/trace`` can never disagree
+        with each other or with the process-wide gate another test may have set.
+        """
+        return {
+            "enabled": self._trace,
+            "level": self._trace_level if self._trace else "OFF",
+            "buffer": self._trace_buffer,
+            # Reported so an operator can tell the cheap structured trace from
+            # the expensive legacy per-frame file log.
+            "textLog": self._text_log,
+        }
 
     def status(self) -> dict:
         if not self._enabled:
@@ -502,6 +663,14 @@ class DetectionService:
             "inferenceCount": self._inference_count,
             "skippedForRate": self._skipped_for_rate,
             "traceEnabled": self._trace,
+            # The level the service was configured with, not the process-wide
+            # current one: two services in one process (tests) must not report
+            # each other's verbosity.
+            "traceLevel": self._trace_level if self._trace else "OFF",
+            # The legacy per-frame file log is a separate, much more expensive
+            # switch; reporting it separately is the only way an operator can
+            # tell which one they are paying for.
+            "textLogEnabled": self._text_log,
         }
 
     def latest(self) -> dict:

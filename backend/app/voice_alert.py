@@ -141,10 +141,25 @@ class VoiceAlertService:
         dedup_key = key or message
         prio = _PRIORITY_MAP.get(priority.upper(), 3)
         item = _AlertItem(message, dedup_key, prio)
+        queued = True
         try:
             self._queue.put_nowait(item)
         except queue.Full:
             logger.debug("Voice queue full, dropping: %s", message)
+            queued = False
+        # Spoken output is the last link of the alert chain, so a trace reader can
+        # confirm the operator was actually told. `queued` matters: a dropped
+        # prompt is exactly the kind of thing that looks fine in the UI.
+        from ai.detection import detect_log
+
+        detect_log.event(
+            "VOICE_SPOKEN" if queued else "VOICE_DROPPED",
+            level=detect_log.TRACE_INFO,
+            instance_id=key,
+            message=message[:160],
+            priority=priority.upper(),
+            queue_depth=self._queue.qsize(),
+        )
 
     def speak_info(self, message: str, *, key: Optional[str] = None) -> None:
         """Queue an informational prompt without blocking perception."""
