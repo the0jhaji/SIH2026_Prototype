@@ -193,7 +193,15 @@ killed and the backend restarted** for the new code/config to take effect.
 
 ## 5. FPS feasibility — stated honestly
 
-Cost per inference is fixed at ~203 ms (one model) / ~390 ms (dual inference).
+> **SUPERSEDED — see §5a and `docs/MODEL_CONFIG_DIAGNOSTIC.md`.**
+> The numbers below are kept as the measured record, but the conclusion that
+> 8–15 AI FPS is unreachable was **wrong**. It was an artifact of
+> `YoloDetector.load()` calling `cv2.setNumThreads(1)` (pinning inference to a
+> single core) while a stale second backend competed for the CPU. With the
+> thread bug fixed on an idle host the pipeline runs at **~17–20 AI FPS**.
+
+Cost per inference at the time of this measurement was ~203 ms (one model) /
+~390 ms (dual inference) — but measured *with one OpenCV thread*.
 
 | Target | Budget | Dual cost | Utilisation | Result |
 |---|---|---|---|---|
@@ -222,6 +230,16 @@ require a *second* forward pass on the crop, making things **worse**, and the
 proven single-frame path is currently ~473 ms. Not implemented, by design.
 
 ---
+
+## 5a. Corrected latency (idle host, 8 OpenCV threads, conf 0.25, trace off)
+
+60 real 1280×720 frames, `yolov8n.onnx` only:
+
+| stage | per frame | FPS |
+|---|---|---|
+| YOLO detect | 51.1 ms | 19.6 |
+| generic motion | 8.0 ms | |
+| **combined** | **59.1 ms** | **16.9** |
 
 ## 6. Verification
 
@@ -255,7 +273,9 @@ produced:
 
 ## 7. Honest limitations
 
-1. **8–15 AI FPS is not reachable here.** Documented, not faked.
+1. **~~8–15 AI FPS is not reachable here.~~** **Corrected:** it *is* reachable
+   (~17–20 AI FPS) once `DETECTION_CV_THREADS` is fixed. See
+   `docs/MODEL_CONFIG_DIAGNOSTIC.md` §F.
 2. **Static *unknown* objects are still not detected.** `GenericProposalDetector`
    is motion-only by design; once an unrecognised object stops moving and the
    background adapts, it vanishes. **Known** objects (incl. `bottle`) are fixed

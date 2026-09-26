@@ -56,6 +56,7 @@ def create_detector(
     model_path: str | None = None,
     classes: Optional[list[str]] = None,
     conf_threshold: float = 0.5,
+    iou_threshold: float = 0.45,
     use_cuda: bool = False,
     scene: str | None = None,
     cv_threads: int | None = None,
@@ -88,6 +89,7 @@ def create_detector(
             model_path=model_path,
             classes=classes,
             conf_threshold=conf_threshold,
+            iou_threshold=iou_threshold,
             use_cuda=use_cuda,
             cv_threads=cv_threads,
         )
@@ -101,6 +103,7 @@ def create_detector(
             dual_options["custom_path"] = custom_model_path
         return DualYoloDetector(
             conf_threshold=conf_threshold,
+            iou_threshold=iou_threshold,
             use_cuda=use_cuda,
             cv_threads=cv_threads,
             **dual_options,

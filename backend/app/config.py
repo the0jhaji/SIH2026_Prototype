@@ -54,11 +54,21 @@ DETECTION_GENERAL_MODEL_PATH = (
 DETECTION_CUSTOM_MODEL_PATH = (
     os.environ.get("DETECTION_CUSTOM_MODEL_PATH", "").strip() or "detection/experiment_custom.onnx"
 )
-DETECTION_CONF_THRESHOLD = float(os.environ.get("DETECTION_CONF_THRESHOLD", "0.5"))
+# Minimum score for a candidate to be reported. 0.25 is the YOLOv8 default and
+# is what the raw sweep on dataset/raw showed is required to see anything beyond
+# the most obvious object: at 0.50 the same frames yielded 15 detections
+# (person+laptop only), at 0.25 they yielded 32 across 5 classes, at 0.10
+# 55 across 9. Raising this silently hides real objects — it does not make the
+# detector "stricter", it just deletes the low-confidence majority.
+DETECTION_CONF_THRESHOLD = float(os.environ.get("DETECTION_CONF_THRESHOLD", "0.25"))
+DETECTION_IOU_THRESHOLD = float(os.environ.get("DETECTION_IOU_THRESHOLD", "0.45"))
 DETECTION_POLL_MS = int(os.environ.get("DETECTION_POLL_MS", "10"))
-# Explicit OpenCV thread pool size for the detector. 0 (default) leaves OpenCV's
-# auto-detect untouched; a positive value caps oversubscription on small hosts.
-DETECTION_CV_THREADS = int(os.environ.get("DETECTION_CV_THREADS", "0"))
+# OpenCV thread pool for the DNN forward. Measured on this 16-logical-CPU host
+# (14 real 1280x720 frames, yolov8n 640): inference was 666ms with 1 thread vs
+# 293ms with 8 threads — a 2.3x difference. The previous behaviour forced
+# setNumThreads(1) whenever this was 0, which silently pinned the detector to a
+# single core. 0 now means "leave OpenCV's auto-detect alone", as documented.
+DETECTION_CV_THREADS = int(os.environ.get("DETECTION_CV_THREADS", "8"))
 # Temporal smoothing of the live detector output (raw -> stable feed):
 #   - DETECTION_DEBOUNCE_FRAMES: consecutive frames a class/box must persist before
 #     it is emitted as a stable detection (2-3 recommended; 1 disables debounce).

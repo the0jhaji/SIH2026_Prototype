@@ -154,6 +154,7 @@ def create_app(
             general_model_path=config.DETECTION_GENERAL_MODEL_PATH,
             custom_model_path=config.DETECTION_CUSTOM_MODEL_PATH,
             conf_threshold=config.DETECTION_CONF_THRESHOLD,
+            iou_threshold=config.DETECTION_IOU_THRESHOLD,
             poll_ms=config.DETECTION_POLL_MS,
             target_fps=config.DETECTION_FPS,
             trace=config.DETECT_LOG_ENABLED,

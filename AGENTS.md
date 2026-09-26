@@ -66,6 +66,35 @@ its own daemon thread and exposes `GET /api/detection/status` +
   `ai` while detection is disabled (inert `DetectionService`, no thread);
   missing YOLO weights / detector failures surface as an `error` in status —
   the app must never crash over detection.
+- **Model roles are fixed and must never be swapped.** `yolov8n.onnx` (80 COCO
+  classes) is the ONLY model allowed to be the general/primary detector.
+  `experiment_custom.onnx` has 2 classes (`red_box`, `yellow_box`) and therefore
+  cannot see a person — it is a *specialised* experiment detector usable only
+  via `DETECTION_BACKEND=dual`. `YoloDetector._warn_if_narrow` logs a loud
+  warning and `DetectorStatus.general_purpose=False` whenever a model with
+  <10 classes is loaded; `start.ps1` prints the role in the startup banner.
+- **Class vocabulary is the model's contract.** A `.names` file next to the
+  ONNX (index-aligned, one per line) overrides the built-in
+  `DEFAULT_CLASSES` placeholder. If it is missing, the 5-entry ASTRA list would
+  be applied to an 80-class head and `keep &= class_ids < 5` would silently
+  drop everything — the app would appear to "only see person" with no error.
+  `YoloDetector._check_channel_match` raises `ValueError` on any
+  `channels - 4 != len(classes)` mismatch on the first forward. Never "fix"
+  that by editing a class list in code.
+- `DetectionService._bootstrap` calls `detector.load()` **eagerly** before
+  reading `status()`. Without it the banner reports the 5-entry placeholder
+  and a null size — i.e. a different model than the one actually in use. A load
+  failure must record `_last_error` and keep the service enabled so status
+  still names the requested detector; never set `_enabled=False` there.
+- `DETECTION_CONF_THRESHOLD` defaults to **0.25** (YOLOv8's own default). At
+  0.50 the same real frames yield 15 detections (person+laptop only); at 0.25
+  they yield 32 across 5 classes. A high threshold deletes objects, it does not
+  make the detector stricter.
+- `DETECTION_CV_THREADS` defaults to **8**, and `0` now means "leave OpenCV's
+  auto selection alone". The old code called `setNumThreads(1)` on 0,
+  contradicting its own config comment and pinning inference to one core:
+  measured 666ms/forward at 1 thread vs 293ms at 8 on a 16-logical-CPU host.
+  Do not re-add a forced single thread.
 - Mock detector is deterministic (`person 0.95`, `red_box 0.91`,
   `yellow_box 0.89`, boxes derived from frame size) so e2e/API tests are
   stable; `scene="empty"` yields no detections.

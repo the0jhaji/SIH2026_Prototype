@@ -48,6 +48,7 @@ class DetectionService:
         general_model_path: str | None = None,
         custom_model_path: str | None = None,
         conf_threshold: float = 0.5,
+        iou_threshold: float = 0.45,
         poll_ms: int = 100,
         target_fps: float = 0.0,
         trace: bool = False,
@@ -70,6 +71,7 @@ class DetectionService:
         self._general_model_path = general_model_path
         self._custom_model_path = custom_model_path
         self._conf_threshold = conf_threshold
+        self._iou_threshold = iou_threshold
         self._poll_ms = max(10, poll_ms)
         self._target_fps = max(0.0, float(target_fps or 0.0))
         self._trace = bool(trace)
@@ -117,6 +119,7 @@ class DetectionService:
                     general_model_path=self._general_model_path,
                     custom_model_path=self._custom_model_path,
                     conf_threshold=self._conf_threshold,
+                    iou_threshold=self._iou_threshold,
                     scene=self._scene,
                     cv_threads=self._cv_threads,
                 )
@@ -126,6 +129,21 @@ class DetectionService:
                     self._last_error = f"Detection backend unavailable: {exc}"
                 self._enabled = False
                 return
+        # Load eagerly. YoloDetector resolves its class vocabulary from the
+        # `.names` file next to the ONNX *inside* load(); reading status()
+        # before that reports the 5-entry DEFAULT_CLASSES placeholder and a
+        # null size — i.e. a completely different model than the one in use.
+        # The status banner must describe the model that is actually loaded.
+        try:
+            self._detector.load()
+        except Exception as exc:  # noqa: BLE001 - surface via status
+            # Do NOT disable here: the caller still needs to see WHICH detector
+            # was requested and WHY it has no weights. Disabling would report
+            # `detector: null` and hide the real cause behind a silent mock-free
+            # idle service. The worker thread retries and keeps the error current.
+            logger.exception("Detection weights could not be loaded")
+            with self._lock:
+                self._last_error = f"Detection weights could not be loaded: {exc}"
         if self._unknown_enabled:
             try:
                 from ai.detection.generic import GenericProposalDetector
@@ -139,13 +157,31 @@ class DetectionService:
                 logger.warning("Unknown-object detector unavailable: %s", exc)
                 self._generic = None
         det_st = self._detector.status()
+        classes = list(det_st.classes)
         logger.info(
-            "Loaded detection model:\n  path=%s\n  type=%s\n  modelLoaded=%s\n  classes(%d): %s",
+            "Loaded detection model:\n"
+            "  backend        = %s\n"
+            "  path           = %s\n"
+            "  size           = %s\n"
+            "  model_loaded   = %s\n"
+            "  class_count    = %d\n"
+            "  general_purpose= %s\n"
+            "  classes        = %s\n"
+            "  input_size     = %s\n"
+            "  conf_threshold = %s\n"
+            "  iou_threshold  = %s",
+            self._kind,
             det_st.model_path,
-            det_st.detector_type,
+            f"{det_st.model_size_mb:.2f} MB" if det_st.model_size_mb else "unknown",
             det_st.model_loaded,
-            len(det_st.classes),
-            ", ".join(f"{i} {c}" for i, c in enumerate(det_st.classes)),
+            len(classes),
+            "yes" if det_st.general_purpose is not False else
+            "NO - narrow vocabulary, cannot detect person/bottle/cup/laptop",
+            ", ".join(classes) if len(classes) <= 20 else
+            f"{', '.join(classes[:20])} ... (+{len(classes) - 20} more)",
+            det_st.input_size,
+            det_st.conf_threshold if det_st.conf_threshold is not None else self._conf_threshold,
+            det_st.iou_threshold,
         )
         self._stop.clear()
         self._thread = threading.Thread(
@@ -360,6 +396,11 @@ class DetectionService:
                 "detector": None,
                 "modelLoaded": False,
                 "modelPath": None,
+                "modelSizeMb": None,
+                "classCount": None,
+                "generalPurpose": None,
+                "inputSize": None,
+                "iouThreshold": None,
                 "classes": None,
                 "confThreshold": self._conf_threshold,
                 "unknownEnabled": self._unknown_enabled,
@@ -386,12 +427,18 @@ class DetectionService:
             raw_unknown = list(self._raw_unknown_detections)
             rates = self._rate_payload()
         det_status = det.status() if det is not None else None
+        classes = list(det_status.classes) if det_status else None
         return {
             "enabled": True,
             "detector": det_status.detector_type if det_status else self._kind,
             "modelLoaded": bool(det_status and det_status.model_loaded),
             "modelPath": det_status.model_path if det_status else None,
-            "classes": list(det_status.classes) if det_status else None,
+            "modelSizeMb": round(det_status.model_size_mb, 2) if det_status and det_status.model_size_mb else None,
+            "classCount": len(classes) if classes is not None else None,
+            "generalPurpose": det_status.general_purpose if det_status else None,
+            "inputSize": det_status.input_size if det_status else None,
+            "iouThreshold": det_status.iou_threshold if det_status else None,
+            "classes": classes,
             "confThreshold": self._conf_threshold,
             "unknownEnabled": self._generic is not None,
             "unknownMode": self._generic.mode if self._generic is not None else None,

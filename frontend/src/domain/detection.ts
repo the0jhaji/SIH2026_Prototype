@@ -19,6 +19,13 @@ export interface DetectionStatus {
   detector: string | null
   modelLoaded: boolean
   modelPath: string | null
+  modelSizeMb: number | null
+  /** Number of classes the loaded model can actually emit. */
+  classCount: number | null
+  /** False = narrow/specialised vocabulary (e.g. red_box+yellow_box only). */
+  generalPurpose: boolean | null
+  inputSize: number | null
+  iouThreshold: number | null
   classes: string[] | null
   confThreshold: number
   unknownEnabled: boolean

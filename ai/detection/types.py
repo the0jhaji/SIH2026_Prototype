@@ -63,9 +63,21 @@ def now_ms() -> int:
 
 @dataclass(frozen=True)
 class DetectorStatus:
-    """Reported by every detector about its own health."""
+    """Reported by every detector about its own health.
+
+    The extra fields are the runtime model identity that the startup banner and
+    ``/api/detection/status`` print, so "which model is actually loaded, with
+    how many classes, at what size and threshold" is answerable from the API
+    rather than guessed from config.
+    """
 
     detector_type: str = ""
     model_loaded: bool = False
     model_path: str | None = None
     classes: tuple[str, ...] = field(default_factory=tuple)
+    input_size: int | None = None
+    conf_threshold: float | None = None
+    iou_threshold: float | None = None
+    model_size_mb: float | None = None
+    #: False for a narrow (specialised) vocabulary that cannot detect people etc.
+    general_purpose: bool | None = None

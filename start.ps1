@@ -132,19 +132,31 @@ Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
 try {
     # ---------------------------------------------------------------- backend
     Write-Step "Starting FastAPI backend on port $BackendPort (detection: yolo)..."
-    # Env for single-model ONNX detection + camera-grounded activity perception.
-    #   CAMERA_MOCK=false  → use real webcam (or set CAMERA_INDEX/CAMERA_WIDTH/CAMERA_HEIGHT)
-    #   DETECTION_ENABLED=true  → enable detection
-    #   DETECTION_BACKEND=yolo  → ONE primary detector (general COCO). Measured on this
-    #       host: dual (general+custom) cost ~0.5-2.2s/frame vs ~0.24-0.52s single,
-    #       because inference is ~85% of the cost and dual runs it twice. The custom
-    #       model only adds red_box/yellow_box; switch DETECTION_BACKEND=dual if you
-    #       need those two classes back and can accept the latency.
-    #   DETECTION_FPS  → AI rate cap, decoupled from the 30 FPS camera (newest frame wins)
-    #   UNATTENDED_TIMEOUT_MS → wall-clock before an unattended object alerts (default 2000)
+    # Detection env. There are exactly TWO models and their roles are fixed:
+    #
+    #   GENERAL / PRIMARY  -> models/detection/yolov8n.onnx   (80 COCO classes)
+    #                         person, bottle, cup, chair, laptop, cell phone,
+    #                         book, keyboard, ... This is the only model that
+    #                         may serve as the sole detector.
+    #   SPECIALISED        -> models/detection/experiment_custom.onnx
+    #                         (2 classes: red_box, yellow_box) ONLY. It cannot
+    #                         see a person, so it must never replace the general
+    #                         model. Used only via DETECTION_BACKEND=dual.
+    #
+    #   DETECTION_BACKEND=yolo  -> one primary model (default, ~2x faster)
+    #   DETECTION_BACKEND=dual  -> general + custom, cross-model NMS (~2x cost)
+    #   DETECTION_CONF_THRESHOLD=0.25 -> YOLOv8 default. Measured: 0.50 hides most
+    #       real objects (15 dets/14 frames, person+laptop only); 0.25 gives 32
+    #       across 5 classes. Do not raise this without measuring.
+    #   DETECTION_CV_THREADS=8  -> OpenCV DNN thread pool. Measured 293ms/forward at
+    #       8 threads vs 666ms at 1 thread on this 16-CPU host.
+    #   DETECTION_FPS  -> AI rate cap, decoupled from the 30 FPS camera (newest frame wins)
     $env:CAMERA_MOCK = 'false'
     $env:DETECTION_ENABLED = 'true'
     $env:DETECTION_BACKEND = 'yolo'
+    $env:DETECTION_MODEL_PATH = 'detection/yolov8n.onnx'
+    $env:DETECTION_CONF_THRESHOLD = '0.25'
+    $env:DETECTION_CV_THREADS = '8'
     $env:DETECTION_FPS = '8'
     $env:ACTIVITY_BACKEND = 'live'
     $backend = Start-Process -FilePath $BackendPy `
@@ -195,7 +207,36 @@ try {
         try {
             $det = $null
             for ($i = 0; $i -lt 20 -and $null -eq $det; $i++) { $det = Invoke-Get "$BackendUrl/api/detection/status" 3; Start-Sleep -Milliseconds 400 }
-            Write-Host "  detection: enabled=$($det.enabled) detector=$($det.detector) status=$($det.inferenceStatus) targetFps=$($det.targetFps) actualFps=$($det.actualFps) inferMs=$($det.inferenceMs)" -ForegroundColor Green
+            # Print the model that is ACTUALLY loaded, not the one we requested.
+            $cls = @()
+            if ($det.classes) { $cls = $det.classes }
+            $clsText = if ($cls.Count -le 12) { $cls -join ', ' } else { "$($cls[0..7] -join ', ') ... (+$($cls.Count - 8) more)" }
+            $sizeText = if ($det.modelSizeMb) { "$($det.modelSizeMb) MB" } else { 'unknown' }
+            $role = if ($det.generalPurpose -eq $false) {
+                'SPECIALISED (narrow vocabulary - CANNOT detect person/bottle/cup!)'
+            } else { 'GENERAL / PRIMARY' }
+            Write-Host ""
+            Write-Host "  [DETECTION RUNTIME]" -ForegroundColor Cyan
+            Write-Host "    backend         = $($det.detector)"
+            Write-Host "    model path      = $($det.modelPath)"
+            Write-Host "    model size      = $sizeText"
+            Write-Host "    model type      = ONNX (OpenCV DNN, CPU)"
+            Write-Host "    role            = $role"
+            Write-Host "    class count     = $($det.classCount)"
+            Write-Host "    class names     = $clsText"
+            Write-Host "    input size      = $($det.inputSize)"
+            Write-Host "    conf threshold  = $($det.confThreshold)"
+            Write-Host "    iou threshold   = $($det.iouThreshold)"
+            Write-Host "    cv threads      = $env:DETECTION_CV_THREADS"
+            Write-Host "    ai rate         = target $($det.targetFps) fps / actual $($det.actualFps) fps"
+            Write-Host "    inference       = $($det.inferenceStatus) ($($det.inferenceMs)ms)"
+            Write-Host "    objects         = $($det.detectionCount) stable / $($det.rawDetectionCount) raw"
+            Write-Host "    trace logging   = $($det.traceEnabled)"
+            if ($det.error) { Write-Host "    ERROR           = $($det.error)" -ForegroundColor Red }
+            if ($det.generalPurpose -eq $false) {
+                Write-Err "    ^ This model cannot detect a person. Set DETECTION_BACKEND=yolo for the general model."
+            }
+            Write-Host ""
         } catch { Write-Err "  detection status unavailable: $($_.Exception.Message)" }
     } else {
         Write-Err "Backend did not become ready on $BackendUrl within timeout."

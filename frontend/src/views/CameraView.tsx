@@ -172,6 +172,33 @@ export function CameraView({
           <p className="mb-2 break-all font-mono text-xs text-on-surface">
             {detectionStatus?.modelPath ?? 'no model loaded'}
           </p>
+          {detectionStatus?.generalPurpose === false && (
+            <p className="mb-2 border border-warning/50 bg-warning/10 px-2 py-1 font-mono text-[11px] text-warning">
+              SPECIALISED MODEL — {detectionStatus.classCount} classes only. It CANNOT
+              detect person/bottle/cup/laptop. Set DETECTION_BACKEND=yolo for the
+              general model.
+            </p>
+          )}
+          <div className="mb-2 grid grid-cols-3 gap-2">
+            <StatTile label="Classes" value={String(detectionStatus?.classCount ?? '—')} />
+            <StatTile
+              label="Size"
+              value={detectionStatus?.modelSizeMb != null ? `${detectionStatus.modelSizeMb}MB` : '—'}
+            />
+            <StatTile label="imgsz" value={String(detectionStatus?.inputSize ?? '—')} />
+            <StatTile label="conf" value={String(detectionStatus?.confThreshold ?? '—')} />
+            <StatTile label="iou" value={String(detectionStatus?.iouThreshold ?? '—')} />
+            <StatTile
+              label="Role"
+              value={
+                detectionStatus?.generalPurpose === false
+                  ? 'SPECIAL'
+                  : detectionStatus?.generalPurpose
+                    ? 'GENERAL'
+                    : '—'
+              }
+            />
+          </div>
           {detectionStatus?.classes ? (
             <ul className="flex flex-wrap gap-1">
               {detectionStatus.classes.map(c => (

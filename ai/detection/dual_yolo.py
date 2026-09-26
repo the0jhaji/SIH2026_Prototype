@@ -125,10 +125,17 @@ class DualYoloDetector(BaseDetector):
         custom_status = self._custom.status()
         all_classes = list(general_status.classes) + list(custom_status.classes)
         return DetectorStatus(
-            detector_type="yolo",
+            detector_type="dual",
             model_loaded=self._loaded,
             model_path=f"general={general_status.model_path} | custom={custom_status.model_path}",
             classes=tuple(all_classes),
+            input_size=general_status.input_size,
+            conf_threshold=general_status.conf_threshold,
+            iou_threshold=general_status.iou_threshold,
+            model_size_mb=(
+                (general_status.model_size_mb or 0.0) + (custom_status.model_size_mb or 0.0)
+            ) or None,
+            general_purpose=bool(general_status.general_purpose),
         )
 
     def close(self) -> None:

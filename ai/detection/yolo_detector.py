@@ -17,6 +17,7 @@ classes only exist after training (see ``models/detection/README.md``).
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -29,7 +30,13 @@ from .types import Detection, DetectorStatus
 
 from ai.pipeline.yolo import DEFAULT_CLASSES, letterbox, postprocess_yolov8, resolve_weights_path
 
+logger = logging.getLogger("astraai.detection")
+
 DEFAULT_MODEL = "detection/yolov8n.onnx"
+
+#: A model with fewer classes than this cannot be a general-purpose detector.
+#: ``experiment_custom.onnx`` (red_box/yellow_box) sits far below it.
+_GENERAL_DETECTOR_MIN_CLASSES = 10
 
 
 def _read_names_file(path: Path) -> list[str]:
@@ -66,6 +73,7 @@ class YoloDetector(BaseDetector):
         self._weights: Path | None = None
         self._error: str | None = None
         self._blob: np.ndarray | None = None
+        self._channels_checked = False
 
     @property
     def is_loaded(self) -> bool:
@@ -100,8 +108,10 @@ class YoloDetector(BaseDetector):
             raise
         if self.cv_threads and self.cv_threads > 0:
             cv2.setNumThreads(self.cv_threads)
-        else:
-            cv2.setNumThreads(1)
+        # else: leave OpenCV's auto thread selection alone. The previous code
+        # called setNumThreads(1) here, which contradicted config.py's own
+        # "0 leaves auto-detect untouched" comment and pinned inference to a
+        # single core (measured 666ms vs 293ms at 8 threads on a 16-CPU host).
         if self.use_cuda:
             try:
                 net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
@@ -111,11 +121,31 @@ class YoloDetector(BaseDetector):
         self._net = net
         self._weights = resolved
         self._error = None
+        self._warn_if_narrow()
         detect_log.dbg_info(
             "MODEL",
             f"loaded path={resolved} exists=true size_mb={resolved.stat().st_size / 1e6:.1f} "
             f"classes={len(self.classes)} input_size={self.input_size} device=cpu "
             f"conf={self.conf_threshold} iou={self.iou_threshold}",
+        )
+
+    def _warn_if_narrow(self) -> None:
+        """A 2-class model is a *specialised* detector, never a general one.
+
+        ``experiment_custom.onnx`` only knows red_box/yellow_box, so loading it
+        as the sole detector makes every person, bottle, cup or laptop
+        undetectable. That is a configuration mistake worth shouting about
+        rather than silently serving an almost-empty frame.
+        """
+        if len(self.classes) >= _GENERAL_DETECTOR_MIN_CLASSES:
+            return
+        logger.warning(
+            "Narrow vocabulary model loaded: %s has only %d classes (%s). "
+            "It CANNOT be used as the general detector — person/bottle/cup/laptop "
+            "etc. will never be reported. Use a general model (e.g. yolov8n.onnx, "
+            "80 COCO classes) as the primary detector and keep this one for its "
+            "own classes only (DETECTION_BACKEND=dual).",
+            self.model_path, len(self.classes), ", ".join(self.classes),
         )
 
     def detect(self, frame: np.ndarray, timestamp_ms: Optional[int] = None) -> list[Detection]:
@@ -129,6 +159,7 @@ class YoloDetector(BaseDetector):
         )
         self._net.setInput(blob)
         outputs = self._net.forward()
+        self._check_channel_match(outputs)
         ts = self._ts(timestamp_ms)
         decoded = postprocess_yolov8(
             outputs,
@@ -155,6 +186,34 @@ class YoloDetector(BaseDetector):
             for d in decoded
         ]
 
+    def _check_channel_match(self, outputs: np.ndarray) -> None:
+        """Fail loudly when the label list and the network's channels disagree.
+
+        A YOLOv8 head emits ``4 + num_classes`` channels. If the ``.names`` file
+        is missing or wrong, the decoder would silently drop every class_id
+        beyond the short list (``keep &= class_ids < num_classes``) and the app
+        would appear to "only see person" with no error anywhere. That is the
+        exact failure this check exists to make visible.
+        """
+        if self._channels_checked:
+            return
+        arr = np.asarray(outputs)
+        if arr.ndim != 3:
+            return
+        channels = arr.shape[1]
+        model_classes = channels - 4
+        if model_classes != len(self.classes):
+            raise ValueError(
+                f"Class vocabulary mismatch for {self.model_path}: the network emits "
+                f"{channels} channels ({model_classes} classes) but "
+                f"{len(self.classes)} class names are configured "
+                f"({', '.join(self.classes[:10])}). Fix the `.names` file next to the "
+                f"ONNX (one index-aligned class per line) or pass an explicit "
+                f"`classes` list — otherwise every class_id >= {len(self.classes)} is "
+                f"silently discarded."
+            )
+        self._channels_checked = True
+
     def status(self) -> DetectorStatus:
         path = str(self._weights) if self._weights else str(resolve_weights_path(self.model_path))
         return DetectorStatus(
@@ -162,6 +221,11 @@ class YoloDetector(BaseDetector):
             model_loaded=self.is_loaded,
             model_path=path,
             classes=tuple(self.classes),
+            input_size=self.input_size,
+            conf_threshold=self.conf_threshold,
+            iou_threshold=self.iou_threshold,
+            model_size_mb=(self._weights.stat().st_size / 1e6) if self._weights else None,
+            general_purpose=len(self.classes) >= _GENERAL_DETECTOR_MIN_CLASSES,
         )
 
     def close(self) -> None:
