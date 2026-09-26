@@ -1,5 +1,10 @@
-import { useEffect, useRef } from 'react'
-import { CLASS_COLOR, type Detection } from '../domain/detection'
+import { useEffect, useMemo, useRef } from 'react'
+import {
+  buildOverlay,
+  resolveFrameSize,
+  type Detection,
+} from '../domain/detection'
+import type { RiskLevel } from '../domain/safety'
 import { expectedStep, stepForActivity } from '../domain/experiment'
 import type { ExperimentState, ObjectKind, StepDef } from '../domain/types'
 import { formatClock } from '../lib/time'
@@ -379,59 +384,90 @@ export function LiveCameraFeed({
   unknownDetections = [],
   frameWidth = null,
   frameHeight = null,
+  hazardLevels = null,
+  unattendedIds = null,
 }: {
   streamUrl: string
   detections?: Detection[]
   unknownDetections?: Detection[]
   frameWidth?: number | null
   frameHeight?: number | null
+  hazardLevels?: Record<string, string> | null
+  unattendedIds?: ReadonlySet<string> | null
 }) {
-  const showBoxes = frameWidth != null && frameHeight != null && frameWidth > 0 && frameHeight > 0
-  const all = [...detections, ...unknownDetections]
+  // Geometry is recomputed only when the payloads or the frame size change —
+  // never per animation frame. The component does no inference of its own: it
+  // draws what the backend already decided.
+  const overlay = useMemo(
+    () =>
+      buildOverlay(detections, unknownDetections, frameWidth, frameHeight, {
+        hazardLevels: hazardLevels as Record<string, RiskLevel> | null,
+        unattendedIds,
+      }),
+    [detections, unknownDetections, frameWidth, frameHeight, hazardLevels, unattendedIds],
+  )
+  const frame = useMemo(
+    () => resolveFrameSize(frameWidth, frameHeight),
+    [frameWidth, frameHeight],
+  )
+
   return (
     <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-slate-200 dark:border-slate-800 dark:bg-slate-950">
-      <img
-        src={streamUrl}
-        alt="Live camera feed"
-        className="block aspect-video w-full object-cover"
-      />
-      {showBoxes && (
-        <div className="pointer-events-none absolute inset-0">
-          {all.map((d, i) => {
-            const isUnknown = d.class_name === 'unknown_object'
-            const left = (d.x1 / (frameWidth as number)) * 100
-            const top = (d.y1 / (frameHeight as number)) * 100
-            const width = ((d.x2 - d.x1) / (frameWidth as number)) * 100
-            const height = ((d.y2 - d.y1) / (frameHeight as number)) * 100
-            return (
-              <div
-                key={i}
-                className="absolute rounded border-2"
+      {/*
+        The overlay must line up with the *rendered image*, not with this
+        container. A `w-fit` wrapper shrink-wraps the image (which keeps its own
+        aspect ratio via max-w/max-h) and the absolutely-positioned box layer
+        then shares the exact same rect — so a 640x640 or 4:3 frame is letterboxed
+        rather than cropped and every percentage stays true.
+      */}
+      <div className="relative mx-auto block w-fit max-w-full">
+        <img
+          src={streamUrl}
+          alt="Live camera feed"
+          className="block h-auto max-h-[75vh] w-auto max-w-full"
+        />
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          {overlay.map(box => (
+            <div
+              key={box.key}
+              className="absolute border-2"
+              style={{
+                left: `${box.left}%`,
+                top: `${box.top}%`,
+                width: `${box.width}%`,
+                height: `${box.height}%`,
+                borderColor: box.color,
+                borderStyle: box.dashed ? 'dashed' : 'solid',
+                boxShadow: box.dashed ? `0 0 0 1px ${box.color}33` : undefined,
+                // Unknown boxes sit under the recognised ones so a duplicate
+                // orange proposal can never be the only thing visible.
+                zIndex: box.style === 'known' || box.style === 'hazard' ? 20 : 10,
+              }}
+              title={box.text}
+            >
+              <span
+                className="pointer-events-none absolute whitespace-nowrap rounded px-1 py-0.5 font-mono text-[10px] font-bold tracking-wide text-slate-950"
                 style={{
-                  left: `${left}%`,
-                  top: `${top}%`,
-                  width: `${width}%`,
-                  height: `${height}%`,
-                  borderColor: isUnknown ? '#ffffff' : CLASS_COLOR[d.class_name] ?? '#38bdf8',
-                  borderStyle: isUnknown ? 'dashed' : 'solid',
+                  background: box.color,
+                  top: box.labelAbove ? '-1.25rem' : '0.1rem',
+                  left: 0,
                 }}
               >
-                <span
-                  className={`absolute -top-5 left-0 rounded px-1 py-0.5 font-mono text-[10px] font-bold tracking-wide ${
-                    isUnknown ? 'bg-white/85 text-slate-900' : 'bg-black/70 text-slate-100'
-                  }`}
-                >
-                  {isUnknown ? (d.instance_id ?? 'unknown') : d.class_name.replace(/_/g, ' ')}{' '}
-                  {Math.round(d.confidence * 100)}%
-                </span>
-              </div>
-            )
-          })}
+                {box.text}
+              </span>
+            </div>
+          ))}
         </div>
-      )}
-      <span className="absolute left-3.5 top-3 rounded bg-black/55 px-2 py-0.5 font-mono text-[11px] font-bold tracking-wide text-slate-200">
+      </div>
+      <span className="pointer-events-none absolute left-3.5 top-3 z-30 rounded bg-black/55 px-2 py-0.5 font-mono text-[11px] font-bold tracking-wide text-slate-200">
         CAM-01 · LIVE FEED
       </span>
+      {import.meta.env.DEV && (
+        <span className="pointer-events-none absolute right-3.5 top-3 z-30 rounded bg-black/70 px-2 py-0.5 font-mono text-[10px] font-bold tracking-wide text-amber-300">
+          {frame ? `Frame: ${frame.width} x ${frame.height}` : 'Frame: —'} · Known: {detections.length} ·
+          Unknown: {unknownDetections.length}
+        </span>
+      )}
     </div>
   )
 }
@@ -443,6 +479,8 @@ export function LiveFeed({
   unknownDetections = [],
   frameWidth = null,
   frameHeight = null,
+  hazardLevels = null,
+  unattendedIds = null,
 }: {
   state: ExperimentState
   streamUrl?: string | null
@@ -450,6 +488,8 @@ export function LiveFeed({
   unknownDetections?: Detection[]
   frameWidth?: number | null
   frameHeight?: number | null
+  hazardLevels?: Record<string, string> | null
+  unattendedIds?: ReadonlySet<string> | null
 }) {
   if (streamUrl) {
     return (
@@ -459,6 +499,8 @@ export function LiveFeed({
         unknownDetections={unknownDetections}
         frameWidth={frameWidth}
         frameHeight={frameHeight}
+        hazardLevels={hazardLevels}
+        unattendedIds={unattendedIds}
       />
     )
   }

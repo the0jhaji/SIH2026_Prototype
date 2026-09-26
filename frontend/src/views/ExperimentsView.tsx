@@ -167,6 +167,7 @@ export function ExperimentsView({
               state={state}
               streamUrl={streamUrl}
               detections={cameraRunning ? detection?.detections ?? [] : []}
+              unknownDetections={cameraRunning ? detection?.unknownDetections ?? [] : []}
               frameWidth={cameraRunning ? detection?.frameWidth ?? null : null}
               frameHeight={cameraRunning ? detection?.frameHeight ?? null : null}
             />

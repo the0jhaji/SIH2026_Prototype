@@ -34,6 +34,42 @@ def _now_ms() -> int | None:
     return int(time.time() * 1000)
 
 
+#: A box smaller than the frame minimum in either axis is a degenerate
+#: detection rather than an object. Rejected by the overlay, not here: the
+#: backend still reports what the model said, the renderer decides what is
+#: drawable.
+
+
+def _clamp_box(payload: dict, frame_w: int, frame_h: int) -> dict:
+    """Clamp one detection payload into the detection frame.
+
+    Every consumer treats these numbers as pixels of *this* frame: the
+    dashboard overlay (percentage of the image), attendance containment,
+    hazard proximity. The EMA tracker only enforces the lower bound, so a
+    detector that emits an out-of-range box produced garbage geometry in all
+    three places at once. Clamping at the seam fixes it once, for everyone.
+    """
+    def _px(value, limit: int) -> int:
+        try:
+            num = int(round(float(value)))
+        except (TypeError, ValueError):
+            return 0
+        return min(max(num, 0), limit)
+
+    return {
+        **payload,
+        "x1": _px(payload.get("x1"), frame_w),
+        "y1": _px(payload.get("y1"), frame_h),
+        "x2": _px(payload.get("x2"), frame_w),
+        "y2": _px(payload.get("y2"), frame_h),
+    }
+
+
+def _payloads(detections, frame_w: int, frame_h: int) -> list[dict]:
+    """Serialize detections to API payloads, clamped to the detection frame."""
+    return [_clamp_box(d.to_dict(), frame_w, frame_h) for d in detections]
+
+
 class DetectionService:
     """Owns the detector thread and exposes ``status()`` / ``latest()`` payloads."""
 
@@ -308,11 +344,15 @@ class DetectionService:
             self._last_error = None
             self._last_inference_ms = _now_ms()
             self._inference_ms = elapsed_ms
-            self._raw_detections = [d.to_dict() for d in raw]
-            self._detections = [d.to_dict() for d in known_stable]
-            self._raw_unknown_detections = [d.to_dict() for d in unknown_raw]
-            self._unknown_detections = [d.to_dict() for d in unknown_stable]
             self._frame_size = (frame.shape[1], frame.shape[0])
+            # Clamp to the frame that was actually analysed. The API contract is
+            # "these boxes are pixels of a frameWidth x frameHeight image", and
+            # the dashboard scales by exactly those numbers.
+            fw, fh = self._frame_size
+            self._raw_detections = _payloads(raw, fw, fh)
+            self._detections = _payloads(known_stable, fw, fh)
+            self._raw_unknown_detections = _payloads(unknown_raw, fw, fh)
+            self._unknown_detections = _payloads(unknown_stable, fw, fh)
             self._inference_count += 1
             self._fps_window_count += 1
             window = time.perf_counter() - self._fps_window_started
@@ -475,10 +515,15 @@ class DetectionService:
             inference_ms = self._inference_ms
             error = self._last_error
             rates = self._rate_payload()
+        frame_size, frame_source = self._resolve_frame_size(frame_size)
         return {
             "enabled": self._enabled,
             "frameWidth": frame_size[0] if frame_size else None,
             "frameHeight": frame_size[1] if frame_size else None,
+            # Where those dimensions came from, so the dashboard can tell a
+            # measured inference frame from the camera's configured request
+            # instead of silently rendering against an assumed size.
+            "frameSizeSource": frame_source,
             "detections": dets,
             "rawDetections": raw,
             "unknownDetections": unknown,
@@ -489,3 +534,32 @@ class DetectionService:
             "error": error,
             **rates,
         }
+
+    def _resolve_frame_size(self, known: tuple[int, int] | None) -> tuple[tuple[int, int] | None, str]:
+        """Best available size of the frame detections are expressed in.
+
+        The overlay divides pixel coordinates by these numbers, so a ``None``
+        here means "render nothing at all" on the client — the failure mode
+        that silently hid the unknown-object boxes. The measured inference
+        frame is authoritative and sticky; before the first inference the live
+        capture supplies the same answer so the feed is drawable immediately.
+
+        There is deliberately NO fallback to the camera's *configured*
+        resolution: with the camera stopped that would report a plausible size
+        for a feed nobody is looking at, and every consumer that treats a
+        non-null frame size as "a frame is being served" (attendance staleness,
+        hazard proximity) would start advancing on a dead camera.
+        """
+        if known and known[0] > 0 and known[1] > 0:
+            return known, "inference"
+        if not self._enabled:
+            return None, "disabled"
+        try:
+            capture = self._camera.latest_capture()
+        except Exception:  # noqa: BLE001 - never fail the payload on telemetry
+            capture = None
+        frame = capture[1] if capture is not None else None
+        shape = getattr(frame, "shape", None)
+        if shape is not None and len(shape) >= 2 and shape[1] > 0 and shape[0] > 0:
+            return (int(shape[1]), int(shape[0])), "camera"
+        return None, "unknown"

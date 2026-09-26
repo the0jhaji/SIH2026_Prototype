@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { CAMERA_STREAM_URL } from '../domain/camera'
 import {
   ALERT_COLORS,
@@ -9,6 +10,7 @@ import {
   tint,
   type HazardAssessment,
 } from '../domain/safety'
+import { hazardLevelsFrom, unattendedIdsFrom } from '../domain/detection'
 import { formatTimestamp } from '../lib/time'
 import { LiveCameraFeed } from '../components/LiveFeed'
 import type { SafetyCommonProps } from './props'
@@ -21,6 +23,7 @@ export function MissionView({
   onCameraStop,
   safety,
   detection,
+  attendance,
 }: SafetyCommonProps) {
   const snapshot = safety.snapshot
   const assessment = snapshot?.top_hazard ?? null
@@ -32,8 +35,17 @@ export function MissionView({
   const stale = snapshot?.feed_stale ?? false
   const streamUrl = cameraRunning ? CAMERA_STREAM_URL : null
   const detections = cameraRunning ? detection.result?.detections ?? [] : []
+  const unknownDetections = cameraRunning ? detection.result?.unknownDetections ?? [] : []
   const frameW = cameraRunning ? detection.result?.frameWidth ?? null : null
   const frameH = cameraRunning ? detection.result?.frameHeight ?? null : null
+  const hazardLevels = useMemo(
+    () => hazardLevelsFrom(snapshot?.assessments),
+    [snapshot],
+  )
+  const unattendedIds = useMemo(
+    () => unattendedIdsFrom(attendance?.result?.watches),
+    [attendance],
+  )
 
   return (
     <div className="space-y-4">
@@ -115,8 +127,11 @@ export function MissionView({
               <LiveCameraFeed
                 streamUrl={streamUrl ?? ''}
                 detections={detections}
+                unknownDetections={unknownDetections}
                 frameWidth={frameW}
                 frameHeight={frameH}
+                hazardLevels={hazardLevels}
+                unattendedIds={unattendedIds}
               />
             ) : (
               <div className="flex aspect-video w-full items-center justify-center border border-outline-variant/30 bg-surface-container-low">

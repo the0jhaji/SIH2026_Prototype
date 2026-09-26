@@ -84,8 +84,6 @@ export default function AppShell() {
               {...common}
               detectionResult={detection.result}
               detectionStatus={detection.status}
-              attendance={attendance.result}
-              attendanceStatus={attendance.status}
             />
           )}
           {view === 'assessment' && <AssessmentView {...common} />}

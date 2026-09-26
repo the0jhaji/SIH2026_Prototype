@@ -154,6 +154,151 @@ def test_mock_detection_end_to_end() -> None:
         assert client.get("/api/camera/snapshot").status_code == 200
 
 
+def test_frame_size_is_served_before_the_first_inference() -> None:
+    """The overlay divides pixel coordinates by frameWidth/frameHeight, so a
+    null frame size means "draw nothing". The dashboard must be able to size the
+    feed as soon as the camera delivers a frame, not only after inference."""
+    detector = create_detector("mock")
+    with make_client(detector=detector) as client:
+        # Enabled, camera idle: nothing is being served, so no frame geometry.
+        idle = client.get("/api/detections").json()
+        assert idle["frameWidth"] is None
+        assert idle["frameHeight"] is None
+        assert idle["frameSizeSource"] == "unknown"
+
+        client.post("/api/camera/start")
+        deadline = time.monotonic() + 5.0
+        payload = idle
+        while time.monotonic() < deadline:
+            payload = client.get("/api/detections").json()
+            if payload["frameWidth"] is not None:
+                break
+            time.sleep(0.01)
+        assert payload["frameWidth"] == 320
+        assert payload["frameHeight"] == 240
+        assert payload["frameSizeSource"] in {"camera", "inference"}
+
+
+def test_disabled_service_never_claims_a_frame_size() -> None:
+    """A disabled detector with a configured camera must not report a frame.
+
+    Consumers read a non-null frame size as "a frame is being served"
+    (attendance staleness, hazard proximity); inventing one from the camera
+    config would let those advance on a dead feed."""
+    from camera import CameraManager
+
+    svc = DetectionService(CameraManager(MOCK_SETTINGS), enabled=False)
+    try:
+        assert svc.latest()["frameWidth"] is None
+        assert svc.latest()["frameSizeSource"] == "disabled"
+    finally:
+        svc.close()
+
+
+def test_detection_boxes_are_clamped_to_the_detection_frame() -> None:
+    """Boxes are pixels of the frame the detector saw. The EMA tracker only
+    enforces the lower bound, so an out-of-range box from any detector would
+    reach the overlay, attendance geometry and hazard proximity un-clamped."""
+    from camera import CameraManager
+
+    from ai.detection.types import Detection, now_ms
+
+    class OversizedDetector:
+        """Emits boxes well outside the frame on both sides."""
+
+        name = "oversized"
+        model_free = True
+
+        def detect(self, frame, timestamp_ms=None):  # noqa: ANN001
+            ts = timestamp_ms or now_ms()
+            return [
+                Detection("person", 0.9, -40, -30, frame.shape[1] + 90, frame.shape[0] + 70, ts),
+                Detection("bottle", 0.8, 5, 5, 120, 150, ts),
+            ]
+
+        def load(self) -> None:
+            return None
+
+        def status(self) -> DetectorStatus:
+            return DetectorStatus(detector_type=self.name, model_loaded=True)
+
+        def close(self) -> None:
+            return None
+
+    svc = DetectionService(
+        CameraManager(MOCK_SETTINGS),
+        detector=OversizedDetector(),
+        enabled=True,
+        debounce_frames=1,
+    )
+    try:
+        svc._camera.start()  # the service never starts the camera for you
+        deadline = time.monotonic() + 5.0
+        boxes: list[dict] = []
+        while time.monotonic() < deadline:
+            boxes = svc.latest()["detections"]
+            if boxes:
+                break
+            time.sleep(0.01)
+        assert boxes, "detector never produced a stable box"
+        for d in boxes:
+            assert 0 <= d["x1"] < d["x2"] <= 320
+            assert 0 <= d["y1"] < d["y2"] <= 240
+        person = next(d for d in boxes if d["class_name"] == "person")
+        assert (person["x1"], person["y1"], person["x2"], person["y2"]) == (0, 0, 320, 240)
+    finally:
+        svc.stop()
+
+
+def test_unknown_detections_carry_a_stable_instance_id() -> None:
+    """The overlay and the attendance chain both key on instance_id; without it
+    an unknown track cannot be followed or styled."""
+    from camera import CameraManager
+
+    class UnknownDetector:
+        """Only ever proposes unknown objects, so the generic chain runs too."""
+
+        name = "unknown-only"
+        model_free = True
+
+        def detect(self, frame, timestamp_ms=None):  # noqa: ANN001
+            return []
+
+        def load(self) -> None:
+            return None
+
+        def status(self) -> DetectorStatus:
+            return DetectorStatus(detector_type=self.name, model_loaded=True, classes=("unknown_object",))
+
+        def close(self) -> None:
+            return None
+
+    svc = DetectionService(
+        CameraManager(MOCK_SETTINGS),
+        detector=UnknownDetector(),
+        enabled=True,
+        debounce_frames=1,
+        unknown_enabled=True,
+    )
+    try:
+        svc._camera.start()  # the service never starts the camera for you
+        deadline = time.monotonic() + 10.0
+        unknown: list[dict] = []
+        while time.monotonic() < deadline:
+            unknown = svc.latest()["unknownDetections"]
+            if unknown:
+                break
+            time.sleep(0.02)
+        assert unknown, "generic proposer produced no unknown track"
+        for d in unknown:
+            assert d["class_name"] == "unknown_object"
+            assert d["instance_id"], "unknown detection must carry an instance id"
+        # Known feed stays separate: the proposer never merges into it.
+        assert all(d["class_name"] != "unknown_object" for d in svc.latest()["detections"])
+    finally:
+        svc.stop()
+
+
 def test_detector_failure_surfaces_error_but_app_survives() -> None:
     with make_client(detector=FailingDetector()) as client:
         start_camera(client)

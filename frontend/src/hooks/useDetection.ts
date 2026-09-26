@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   DETECTION_POLL_MS,
   DETECTION_STATUS_URL,
@@ -7,6 +7,24 @@ import {
   type DetectionStatus,
 } from '../domain/detection'
 import type { ExperimentMode } from './useExperiment'
+
+/**
+ * One short line per *change* of the detection payload, not per poll and not
+ * per animation frame. This is the single place that knows what arrived from
+ * the backend, so it is the only place a log is needed to answer "did the frame
+ * size, the unknown feed and the size provenance reach the frontend?".
+ */
+function logDetectionChange(
+  result: DetectionResult,
+): void {
+  if (!import.meta.env.DEV) return
+  const { frameWidth, frameHeight, detections, unknownDetections, frameSizeSource } = result
+  const frame = frameWidth && frameHeight ? `${frameWidth}x${frameHeight}` : 'null'
+  console.debug(
+    `[detection] frame=${frame} source=${frameSizeSource ?? 'n/a'} ` +
+      `known=${detections.length} unknown=${unknownDetections.length}`,
+  )
+}
 
 /**
  * Polls the backend detector status + last result every second.
@@ -19,6 +37,7 @@ export function useDetection(mode: ExperimentMode) {
   const [status, setStatus] = useState<DetectionStatus | null>(null)
   const [result, setResult] = useState<DetectionResult | null>(null)
   const [offline, setOffline] = useState(false)
+  const signatureRef = useRef<string>('')
 
   useEffect(() => {
     if (mode !== 'backend') return
@@ -37,6 +56,19 @@ export function useDetection(mode: ExperimentMode) {
         setStatus(nextStatus)
         setResult(nextResult)
         setOffline(false)
+        // Signature over everything the overlay depends on: the frame geometry
+        // and the two feeds. Object identity churns every poll, counts do not.
+        const signature = [
+          nextResult.frameWidth,
+          nextResult.frameHeight,
+          nextResult.frameSizeSource,
+          nextResult.detections.length,
+          nextResult.unknownDetections.length,
+        ].join(':')
+        if (signature !== signatureRef.current) {
+          signatureRef.current = signature
+          logDetectionChange(nextResult)
+        }
       } catch {
         if (cancelled) return
         setStatus(null)

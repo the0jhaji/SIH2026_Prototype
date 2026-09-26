@@ -2,7 +2,7 @@ import { CAMERA_STREAM_URL } from '../domain/camera'
 import { expectedStep } from '../domain/experiment'
 import type { CameraInfo } from '../domain/camera'
 import type { DetectionResult } from '../domain/detection'
-import { CLASS_COLOR } from '../domain/detection'
+import { BOX_COLORS, CLASS_COLOR, UNKNOWN_CLASS } from '../domain/detection'
 import type { ExperimentMode } from '../hooks/useExperiment'
 import type { ExperimentState } from '../domain/types'
 import { LiveFeed } from '../components/LiveFeed'
@@ -121,10 +121,13 @@ export function LiveMonitorView({
                     <span
                       className="h-2 w-2"
                       style={{
-                        background: d.class_name === 'unknown_object' ? '#ffffff' : CLASS_COLOR[d.class_name] ?? '#4cd7f6',
+                        background:
+                          d.class_name === UNKNOWN_CLASS
+                            ? BOX_COLORS.unknown
+                            : CLASS_COLOR[d.class_name] ?? '#4cd7f6',
                       }}
                     />
-                    {d.class_name === 'unknown_object'
+                    {d.class_name === UNKNOWN_CLASS
                       ? `unknown (${d.instance_id ?? '?'})`
                       : d.class_name.replace(/_/g, ' ')}
                   </span>

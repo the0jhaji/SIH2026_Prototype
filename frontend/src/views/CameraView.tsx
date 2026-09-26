@@ -1,6 +1,14 @@
+import { useMemo } from 'react'
 import { CAMERA_STREAM_URL } from '../domain/camera'
-import { CLASS_COLOR, type DetectionResult, type DetectionStatus } from '../domain/detection'
-import type { AttendanceResult, AttendanceStatus } from '../domain/attendance'
+import {
+  BOX_COLORS,
+  CLASS_COLOR,
+  UNKNOWN_CLASS,
+  hazardLevelsFrom,
+  unattendedIdsFrom,
+  type DetectionResult,
+  type DetectionStatus,
+} from '../domain/detection'
 import { LiveCameraFeed } from '../components/LiveFeed'
 import { Empty, Panel, StatTile } from './ui'
 import type { SafetyCommonProps } from './props'
@@ -8,8 +16,6 @@ import type { SafetyCommonProps } from './props'
 interface Props extends SafetyCommonProps {
   detectionStatus: DetectionStatus | null
   detectionResult: DetectionResult | null
-  attendance: AttendanceResult | null
-  attendanceStatus: AttendanceStatus | null
 }
 
 const STATE_TONE: Record<string, string> = {
@@ -28,15 +34,28 @@ export function CameraView({
   cameraOffline,
   onCameraStart,
   onCameraStop,
+  safety,
   detectionResult,
   detectionStatus,
   attendance,
-  attendanceStatus,
 }: Props) {
   const streamUrl = cameraRunning ? CAMERA_STREAM_URL : null
+  // The unknown feed is a separate stream from the recognised one and is merged
+  // only inside the overlay. It used to be dropped here entirely, which is why
+  // unknown boxes never appeared on this view.
   const detections = cameraRunning ? detectionResult?.detections ?? [] : []
+  const unknownDetections = cameraRunning ? detectionResult?.unknownDetections ?? [] : []
   const frameW = cameraRunning ? detectionResult?.frameWidth ?? null : null
   const frameH = cameraRunning ? detectionResult?.frameHeight ?? null : null
+  const hazardLevels = useMemo(
+    () => hazardLevelsFrom(safety.snapshot?.assessments),
+    [safety.snapshot],
+  )
+  const unattendedIds = useMemo(
+    () => unattendedIdsFrom(attendance?.result?.watches),
+    [attendance],
+  )
+  const allDetections = [...detections, ...unknownDetections]
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_18rem]">
@@ -53,8 +72,11 @@ export function CameraView({
             <LiveCameraFeed
               streamUrl={streamUrl ?? ''}
               detections={detections}
+              unknownDetections={unknownDetections}
               frameWidth={frameW}
               frameHeight={frameH}
+              hazardLevels={hazardLevels}
+              unattendedIds={unattendedIds}
             />
           ) : (
             <div className="flex aspect-video w-full items-center justify-center border border-outline-variant/30 bg-surface-container-low">
@@ -85,8 +107,17 @@ export function CameraView({
           </div>
         </Panel>
 
-        <Panel title="Detections">
-          {detections.length === 0 ? (
+        <Panel
+          title="Detections"
+          right={
+            <span className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">
+              {allDetections.length === 0
+                ? 'IDLE'
+                : `${detections.length} KNOWN · ${unknownDetections.length} UNKNOWN`}
+            </span>
+          }
+        >
+          {allDetections.length === 0 ? (
             <Empty
               label={
                 cameraRunning
@@ -96,23 +127,41 @@ export function CameraView({
             />
           ) : (
             <ul className="mt-1 space-y-1.5">
-              {detections.map((d, i) => (
-                <li
-                  key={`${d.timestamp}-${i}`}
-                  className="flex items-center justify-between border border-outline-variant/30 bg-surface-container-low px-2.5 py-1.5"
-                >
-                  <span className="flex items-center gap-2 font-mono text-[11px] font-bold uppercase tracking-wider">
-                    <span
-                      className="h-2 w-2"
-                      style={{ background: CLASS_COLOR[d.class_name] ?? '#4cd7f6' }}
-                    />
-                    {d.class_name.replace(/_/g, ' ')}
-                  </span>
-                  <span className="font-mono text-[11px] text-secondary">
-                    {Math.round(d.confidence * 100)}%
-                  </span>
-                </li>
-              ))}
+              {allDetections.map((d, i) => {
+                const isUnknown = d.class_name === UNKNOWN_CLASS
+                const isUnattended = isUnknown && unattendedIds.has(d.instance_id ?? '')
+                return (
+                  <li
+                    key={`${d.instance_id ?? d.timestamp}-${i}`}
+                    className={`flex items-center justify-between border px-2.5 py-1.5 ${
+                      isUnattended
+                        ? 'border-error/50 bg-error/10'
+                        : 'border-outline-variant/30 bg-surface-container-low'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 font-mono text-[11px] font-bold uppercase tracking-wider">
+                      <span
+                        className="h-2 w-2"
+                        style={{
+                          background: isUnattended
+                            ? BOX_COLORS.unattended
+                            : isUnknown
+                              ? BOX_COLORS.unknown
+                              : CLASS_COLOR[d.class_name] ?? '#4cd7f6',
+                        }}
+                      />
+                      {isUnattended
+                        ? 'unattended object'
+                        : isUnknown
+                          ? `unknown (${d.instance_id ?? '?'})`
+                          : d.class_name.replace(/_/g, ' ')}
+                    </span>
+                    <span className="font-mono text-[11px] text-secondary">
+                      {Math.round(d.confidence * 100)}%
+                    </span>
+                  </li>
+                )
+              })}
             </ul>
           )}
         </Panel>
@@ -129,6 +178,19 @@ export function CameraView({
               value={detectionResult?.inferenceMs != null ? `${detectionResult.inferenceMs}ms` : '—'}
             />
             <StatTile label="Objects" value={String(detections.length)} />
+            <StatTile
+              label="Unknown"
+              value={String(unknownDetections.length)}
+              color={unknownDetections.length > 0 ? BOX_COLORS.unknown : undefined}
+            />
+            <StatTile
+              label="Frame"
+              value={
+                detectionResult?.frameWidth && detectionResult?.frameHeight
+                  ? `${detectionResult.frameWidth}x${detectionResult.frameHeight}`
+                  : '—'
+              }
+            />
             <StatTile
               label="Raw/Stable"
               value={
@@ -219,8 +281,8 @@ export function CameraView({
           title="Object Containment & Attendance"
           right={
             <span className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">
-              {attendanceStatus?.objects != null
-                ? `${attendanceStatus.objects} TRACKED · ${attendanceStatus.unattendedCount ?? 0} UNATTENDED`
+              {attendance.status?.objects != null
+                ? `${attendance.status.objects} TRACKED · ${attendance.status.unattendedCount ?? 0} UNATTENDED`
                 : 'IDLE'}
             </span>
           }
@@ -228,17 +290,17 @@ export function CameraView({
           <div className="grid grid-cols-3 gap-2">
             <StatTile
               label="In Container"
-              value={String(attendanceStatus?.inContainerCount ?? 0)}
+              value={String(attendance.status?.inContainerCount ?? 0)}
             />
             <StatTile
               label="Unattended"
-              value={String(attendanceStatus?.unattendedCount ?? 0)}
+              value={String(attendance.status?.unattendedCount ?? 0)}
             />
             <StatTile
               label="Timeout"
               value={
-                attendanceStatus?.thresholds?.unattendedTimeoutMs != null
-                  ? `${(attendanceStatus.thresholds.unattendedTimeoutMs / 1000).toFixed(1)}s`
+                attendance.status?.thresholds?.unattendedTimeoutMs != null
+                  ? `${(attendance.status.thresholds.unattendedTimeoutMs / 1000).toFixed(1)}s`
                   : '—'
               }
             />
@@ -246,11 +308,11 @@ export function CameraView({
 
           {!cameraRunning ? (
             <Empty label="Camera offline — containment needs the live feed." />
-          ) : (attendance?.watches ?? []).length === 0 ? (
+          ) : (attendance.result?.watches ?? []).length === 0 ? (
             <Empty label="Tracking objects. Show an object near a container." />
           ) : (
             <ul className="mt-3 space-y-1.5">
-              {(attendance?.watches ?? []).map(w => (
+              {(attendance.result?.watches ?? []).map(w => (
                 <li
                   key={w.instanceId}
                   className={`border px-2.5 py-1.5 ${watchTone(w.state)}`}
@@ -280,13 +342,13 @@ export function CameraView({
             </ul>
           )}
 
-          {(attendance?.events ?? []).length > 0 && (
+          {(attendance.result?.events ?? []).length > 0 && (
             <div className="mt-3">
               <p className="mb-1 font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">
                 Recent events
               </p>
               <ul className="space-y-1">
-                {(attendance?.events ?? [])
+                {(attendance.result?.events ?? [])
                   .slice(-6)
                   .reverse()
                   .map(e => (
