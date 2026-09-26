@@ -8,11 +8,10 @@ import {
   unattendedIdsFrom,
   type Detection,
 } from '../domain/detection'
-import { expectedStep } from '../domain/experiment'
 import { LiveCameraFeed } from '../components/LiveFeed'
-import { EmptyState, KeyValue, Panel, StatTile } from './ui'
+import { EmptyState, Panel, StatTile } from './ui'
 import { PageShell, Timeline } from './layout'
-import { attendanceEventEntries, basEventEntries, relativeAge, safetyEventEntries, severityColor, stateColor } from './helpers'
+import { attendanceEventEntries, basEventEntries, relativeAge, safetyEventEntries, stateColor } from './helpers'
 import type { SafetyCommonProps } from './props'
 
 /** Stage duration for the trace panel. `—` means the stage never ran, not 0 ms. */
@@ -20,40 +19,26 @@ function fmtMs(value: number | null | undefined): string {
   return value == null ? '—' : `${value.toFixed(1)}ms`
 }
 
-const STATE_TONE: Record<string, string> = {
-  UNATTENDED: 'border-error/50 bg-error/10',
-  RELEASED: 'border-warning/50 bg-warning/10',
-  ATTENDED: 'border-outline-variant/40 bg-surface-container-low',
-  OBJECT_INSIDE_BOX: 'border-primary/40 bg-primary/10',
-}
-
-function watchTone(state: string): string {
-  return STATE_TONE[state] ?? 'border-outline-variant/40 bg-surface-container-low'
-}
-
-const ACTION_LABEL: Record<string, string> = { PICK: 'Pick', PLACE: 'Place', OPEN: 'Open' }
-
 /** Row shares of the page height.
  *
- *  The video is height-bound, not width-bound: a 16:9 source in a panel this
- *  wide is always limited by the height it is given, so the only way to make
- *  the feed larger is to hand its row more of the page. The cards and the
- *  monitoring strip keep their own content and layout — they just take a
- *  smaller slice, and both scroll internally, so no region is left blank. */
-const CAMERA_ROW = '1 1 74%'
-const INTEL_ROW = '1 1 15%'
-const MONITOR_ROW = '1 1 11%'
+ *  The camera row is content-sized (`0 0 auto`): its viewport is a 16:9 box
+ *  sized from the available width, so squeezing the row would distort that box
+ *  and force `cover` to crop. When the two rows together are taller than the
+ *  viewport, `.page-scroll` scrolls — it is this view's designated scrolling
+ *  region — instead of the frame being squashed. The monitoring strip keeps the
+ *  share it already had. */
+const CAMERA_ROW = '0 0 auto'
+const MONITOR_ROW = '0 0 11%'
 
 /**
  * LIVE OBSERVATION — the camera is the page.
  *
- * The live frame is the primary element: it fills a 16:9 box sized from the
- * camera's own resolution (never stretched, `object-contain` inside a box that
- * already matches the frame aspect), with the transport controls docked
- * directly beneath it. Everything else is intelligence *about* that frame —
- * what the crew member is doing, what they are holding, where the procedure
- * stands, and the raw telemetry — arranged so no region of the page is left
- * blank.
+ * The live frame is the only thing in the main content area: it fills it edge
+ * to edge, with the transport controls docked directly beneath it. Current
+ * Activity, Human-Object Interaction and Procedure Intelligence are no longer
+ * rendered here — that telemetry is unchanged and still served by the
+ * monitoring strip below and by the Mission, Experiments, Station and Alerts
+ * views; only this panel's copy of it is gone.
  *
  * The picture and its overlay come from the same `LiveCameraFeed` the rest of
  * the app uses, fed by `/api/camera/stream` and the backend's real
@@ -64,7 +49,6 @@ const MONITOR_ROW = '1 1 11%'
  */
 export function CameraView({
   state,
-  engine,
   camera,
   cameraRunning,
   cameraOffline,
@@ -88,27 +72,6 @@ export function CameraView({
   const tone = stateColor(snapshot?.mission_state)
   const activeAlerts = safety.alerts.filter(a => !a.resolved)
 
-  const expected = expectedStep(state.experiment, state.currentStepIndex)
-  const observed = state.currentDetected ?? null
-  const activityLabel = observed?.activity
-    ? observed.activity.replace(/_/g, ' ')
-    : (engine?.last_activity?.label ?? null)
-  const activityConfidence = observed?.confidence ?? engine?.last_activity?.confidence ?? null
-  const activityTs = observed?.ts ?? null
-
-  const watches = attendance.result?.watches ?? []
-  const nearAstronaut = watches.filter(w => w.personId != null)
-  const held = watches.find(w => w.state === 'HELD') ?? null
-  const interactionState = held
-    ? 'HELD'
-    : (attendance.status?.unattendedCount ?? 0) > 0
-      ? 'UNATTENDED'
-      : nearAstronaut.length > 0
-        ? 'IN CONTACT'
-        : watches.length > 0
-          ? 'TRACKING'
-          : 'NO CONTACT'
-
   const activityTimeline = useMemo(() => basEventEntries(state.log, 40), [state.log])
   const systemTimeline = useMemo(
     () => [...safetyEventEntries(safety.events, 30), ...attendanceEventEntries(attendance.result?.events, 20)],
@@ -118,7 +81,7 @@ export function CameraView({
   return (
     <PageShell>
       {/* ── 1. Live camera — the primary element ─────────────────────── */}
-      <div className="min-h-[15rem]" style={{ flex: CAMERA_ROW }}>
+      <div style={{ flex: CAMERA_ROW }}>
         <Panel
           title="Live Camera Feed"
           fill
@@ -132,22 +95,24 @@ export function CameraView({
           }
         >
           {streamRunning ? (
-            /* No height floor here: the row is flex-sized and the box takes all
-               of it, so the feed claims every pixel the panel can give it. */
-            <div className="flex min-h-0 flex-1 items-center justify-center">
-              <div className="flex h-full w-full flex-col">
-                <div className="relative flex min-h-0 flex-1 flex-col">
-                  <LiveCameraFeed
-                    streamUrl={CAMERA_STREAM_URL}
-                    detections={detections}
-                    unknownDetections={unknownDetections}
-                    frameWidth={frameW}
-                    frameHeight={frameH}
-                    hazardLevels={hazardLevels}
-                    unattendedIds={unattendedIds}
-                    fill
-                    fit="cover"
-                  />
+            /* The viewport is sized by its own width at the camera's real frame
+               aspect, so the picture fills it edge to edge: no letterbox, no
+               crop, and the overlay rect is the box. Nothing here may stretch
+               the box vertically — that is what `aspect` exists to prevent. */
+            <div className="flex w-full flex-col">
+              <div className="relative w-full">
+                <LiveCameraFeed
+                  streamUrl={CAMERA_STREAM_URL}
+                  detections={detections}
+                  unknownDetections={unknownDetections}
+                  frameWidth={frameW}
+                  frameHeight={frameH}
+                  hazardLevels={hazardLevels}
+                  unattendedIds={unattendedIds}
+                  fill
+                  fit="cover"
+                  aspect={frameW && frameH ? `${frameW} / ${frameH}` : '16 / 9'}
+                />
 
                   {/* Real telemetry only — every field is a live backend value. */}
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 px-2 pb-1 font-mono text-[10px] uppercase tracking-wider text-slate-300">
@@ -163,30 +128,29 @@ export function CameraView({
                       {frameW && frameH ? `${frameW}×${frameH}` : '—'} · {status?.detector ?? '—'}
                     </span>
                   </div>
-                </div>
+              </div>
 
-                {/* Transport controls, docked directly under the frame and
-                    sharing its width. */}
-                <div className="grid shrink-0 grid-cols-2 gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={onCameraStart}
-                    disabled={cameraRunning || cameraOffline}
-                    className="btn-primary"
-                  >
-                    <span className="msym text-base leading-none">videocam</span>
-                    CAM ON
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onCameraStop}
-                    disabled={!cameraRunning}
-                    className="btn-outline"
-                  >
-                    <span className="msym text-base leading-none">videocam_off</span>
-                    CAM OFF
-                  </button>
-                </div>
+              {/* Transport controls, docked directly under the frame and
+                  sharing its width. */}
+              <div className="grid shrink-0 grid-cols-2 gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={onCameraStart}
+                  disabled={cameraRunning || cameraOffline}
+                  className="btn-primary"
+                >
+                  <span className="msym text-base leading-none">videocam</span>
+                  CAM ON
+                </button>
+                <button
+                  type="button"
+                  onClick={onCameraStop}
+                  disabled={!cameraRunning}
+                  className="btn-outline"
+                >
+                  <span className="msym text-base leading-none">videocam_off</span>
+                  CAM OFF
+                </button>
               </div>
             </div>
           ) : (
@@ -207,171 +171,7 @@ export function CameraView({
         </Panel>
       </div>
 
-      {/* ── 2. Intelligence about the frame ──────────────────────────── */}
-      <div
-        className="grid min-h-0 grid-cols-1 gap-[var(--grid-gap)] lg:grid-cols-3"
-        style={{ flex: INTEL_ROW }}
-      >
-        <Panel title="Current Activity" fill scroll>
-          <KeyValue label="Detected activity" value={activityLabel ?? '—'} color={activityLabel ? '#4cd7f6' : undefined} />
-          <KeyValue
-            label="Confidence"
-            value={activityConfidence != null ? `${Math.round(activityConfidence * 100)}%` : '—'}
-          />
-          <KeyValue label="Activity state" value={state.status} color={tone} />
-          <KeyValue
-            label="Last result"
-            value={state.lastClassification?.result ?? '—'}
-            color={state.lastClassification ? severityColor(state.lastClassification.severity) : undefined}
-          />
-          <KeyValue
-            label="Detection time"
-            value={activityTs ? `${new Date(activityTs).toLocaleTimeString()} (${relativeAge(activityTs)})` : '—'}
-          />
-        </Panel>
-
-        <Panel title="Human–Object Interaction" fill scroll>
-          <KeyValue label="Tracked objects" value={String(attendance.status?.objects ?? 0)} />
-          <KeyValue
-            label="Near astronaut"
-            value={String(nearAstronaut.length)}
-            color={nearAstronaut.length > 0 ? '#4cd7f6' : undefined}
-          />
-          <KeyValue
-            label="Currently held"
-            value={held ? held.className.replace(/_/g, ' ') : 'none'}
-            color={held ? '#4ade80' : undefined}
-          />
-          <KeyValue
-            label="Interaction state"
-            value={interactionState}
-            color={
-              interactionState === 'HELD'
-                ? '#4ade80'
-                : interactionState === 'UNATTENDED'
-                  ? '#ef4444'
-                  : undefined
-            }
-          />
-          <KeyValue
-            label="Unattended"
-            value={String(attendance.status?.unattendedCount ?? 0)}
-            color={(attendance.status?.unattendedCount ?? 0) > 0 ? '#ef4444' : undefined}
-          />
-          <KeyValue label="In container" value={String(attendance.status?.inContainerCount ?? 0)} />
-          {attendance.status && (
-            <p className="mt-1.5 font-mono text-[10px] leading-snug text-on-surface-variant">
-              proximity ≤ {attendance.status.thresholds.proximity} · containment ≥{' '}
-              {attendance.status.thresholds.containment} · arm reach{' '}
-              {attendance.status.thresholds.armReach} · held {attendance.status.thresholds.heldFrames}{' '}
-              frames · tracked {attendance.status.thresholds.trackedClasses.length} classes ·{' '}
-              {attendance.status.monitoring ? 'monitoring on' : 'monitoring off'}
-            </p>
-          )}
-          {watches.length > 0 ? (
-            <ul className="rows mt-1.5">
-              {watches.map(w => (
-                <li key={w.instanceId} className={`border px-2 py-1 ${watchTone(w.state)}`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="min-w-0 truncate font-mono text-[11px] font-bold uppercase tracking-wider">
-                      {w.className.replace(/_/g, ' ')}
-                    </span>
-                    <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider">
-                      {w.state.replace(/_/g, ' ')}
-                    </span>
-                  </div>
-                  <div className="mt-0.5 flex flex-wrap gap-x-3 font-mono text-[10px] opacity-80">
-                    <span>id {w.instanceId}</span>
-                    {w.insideContainer && (
-                      <span>
-                        in {w.containerClass?.replace(/_/g, ' ') ?? '?'} ·{' '}
-                        {(w.containmentScore * 100).toFixed(0)}%
-                      </span>
-                    )}
-                    {w.personId && <span>held by {w.personId}</span>}
-                    {w.isUnknown && <span>unknown class</span>}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-1.5 font-mono text-[10px] text-on-surface-variant">
-              {streamRunning ? 'Tracking objects. Show an object near the astronaut.' : 'Camera offline — no interaction data.'}
-            </p>
-          )}
-        </Panel>
-
-        <Panel title="Procedure Intelligence" fill scroll>
-          <KeyValue
-            label="Current step"
-            value={
-              expected
-                ? `${state.currentStepIndex + 1}/${state.experiment.steps.length} · ${expected.label}`
-                : 'Procedure complete'
-            }
-          />
-          <KeyValue
-            label="Expected action"
-            value={expected ? `${ACTION_LABEL[expected.action ?? ''] ?? expected.action} ${expected.object ?? ''}`.trim() : '—'}
-            color="#4cd7f6"
-          />
-          <KeyValue
-            label="Observed action"
-            value={activityLabel ?? '—'}
-            color={
-              state.lastClassification?.result === 'CORRECT'
-                ? '#4ade80'
-                : state.lastClassification?.result
-                  ? '#f97316'
-                  : undefined
-            }
-          />
-          <KeyValue label="Procedure status" value={state.status} color={tone} />
-          <KeyValue
-            label="Confidence"
-            value={activityConfidence != null ? `${Math.round(activityConfidence * 100)}%` : '—'}
-          />
-          <div className="mt-1.5 grid grid-cols-4 gap-[var(--row-pad)]">
-            <StatTile label="OOS" value={String(state.errors.outOfSequence)} color={state.errors.outOfSequence > 0 ? '#f97316' : undefined} />
-            <StatTile label="SKIP" value={String(state.errors.skipped)} color={state.errors.skipped > 0 ? '#f97316' : undefined} />
-            <StatTile label="REP" value={String(state.errors.repeated)} color={state.errors.repeated > 0 ? '#f97316' : undefined} />
-            <StatTile label="UNK" value={String(state.errors.unknown)} color={state.errors.unknown > 0 ? '#ef4444' : undefined} />
-          </div>
-          {engine && (
-            <p className="mt-1.5 font-mono text-[10px] text-on-surface-variant">
-              engine {engine.status} · {engine.completed_count}/{engine.total_steps} complete ·{' '}
-              {engine.violation_count} violation{engine.violation_count === 1 ? '' : 's'}
-            </p>
-          )}
-          <ol className="rows mt-1.5">
-            {state.experiment.steps.map((step, i) => {
-              const done = state.completedStepIds.includes(step.id)
-              const current = state.status === 'RUNNING' && expected?.id === step.id
-              return (
-                <li
-                  key={step.id}
-                  className="flex items-center gap-2 border px-2 py-1"
-                  style={{
-                    borderColor: done
-                      ? 'color-mix(in oklab, #22c55e 45%, transparent)'
-                      : current
-                        ? 'color-mix(in oklab, var(--color-primary) 60%, transparent)'
-                        : 'color-mix(in oklab, var(--t-outline-variant) 30%, transparent)',
-                  }}
-                >
-                  <span className="shrink-0 font-mono text-[10px] font-bold">{done ? '✓' : i + 1}</span>
-                  <span className="min-w-0 flex-1 truncate font-mono text-[10px]">{step.label}</span>
-                  <span className="shrink-0 font-mono text-[9px] uppercase tracking-wider text-on-surface-variant">
-                    {ACTION_LABEL[step.action ?? ''] ?? step.action}
-                  </span>
-                </li>
-              )
-            })}
-          </ol>
-        </Panel>
-      </div>
-
-      {/* ── 3. Compact AI monitoring strip ───────────────────────────── */}
+      {/* ── 2. Compact AI monitoring strip ───────────────────────────── */}
       <div
         className="grid min-h-0 grid-cols-1 gap-[var(--grid-gap)] md:grid-cols-2 xl:grid-cols-4"
         style={{ flex: MONITOR_ROW }}

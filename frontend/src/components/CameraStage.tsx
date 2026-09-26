@@ -25,6 +25,7 @@ export function CameraStage({
   hazardLevels,
   unattendedIds,
   fill = false,
+  aspect,
   onStart,
   onStop,
   showControls = true,
@@ -40,6 +41,17 @@ export function CameraStage({
   hazardLevels?: Record<string, RiskLevel> | null
   unattendedIds?: ReadonlySet<string> | null
   fill?: boolean
+  /**
+   * Frame aspect for the viewport, e.g. `'16 / 9'`, taken from the camera's
+   * real `frameWidth`/`frameHeight`.
+   *
+   * Without it a filling stage hands the box whatever height the panel has and
+   * `contain` letterboxes the difference, so the picture ends up shorter than
+   * its own width implies. With it the box takes its height from its width, the
+   * frame fills it with no bars, and the transport pins to the bottom of the
+   * panel instead of leaving a gap under it.
+   */
+  aspect?: string
   onStart: () => void
   onStop: () => void
   showControls?: boolean
@@ -47,7 +59,7 @@ export function CameraStage({
   footer?: ReactNode
 }) {
   return (
-    <div className={`flex flex-col ${fill ? 'min-h-0 flex-1' : ''}`}>
+    <div className={`flex flex-col ${fill ? 'min-h-0 flex-1' : ''} ${aspect ? 'justify-between' : ''}`}>
       {running ? (
         <LiveCameraFeed
           streamUrl={CAMERA_STREAM_URL}
@@ -58,9 +70,16 @@ export function CameraStage({
           hazardLevels={hazardLevels}
           unattendedIds={unattendedIds}
           fill={fill}
+          fit="cover"
+          aspect={aspect}
         />
       ) : (
-        <div className={`flex items-center justify-center bg-black ${fill ? 'min-h-0 flex-1' : 'aspect-video w-full'}`}>
+        /* The offline box takes the same aspect as the live one, so pressing
+           CAM ON does not change the shape of the panel. */
+        <div
+          className={`flex items-center justify-center bg-black ${aspect || !fill ? 'aspect-video w-full' : 'min-h-0 flex-1'}`}
+          style={aspect ? { aspectRatio: aspect } : undefined}
+        >
           <EmptyState
             icon="videocam_off"
             title={offline ? 'Camera offline' : 'No camera feed'}

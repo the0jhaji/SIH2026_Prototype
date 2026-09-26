@@ -388,6 +388,7 @@ export function LiveCameraFeed({
   unattendedIds = null,
   fill = false,
   fit = 'contain',
+  aspect = undefined,
 }: {
   streamUrl: string
   detections?: Detection[]
@@ -412,6 +413,17 @@ export function LiveCameraFeed({
    * image rect, so the boxes stay glued to the objects.
    */
   fit?: 'contain' | 'cover'
+  /**
+   * Lock the box to a frame aspect, e.g. `'16 / 9'`, and let its width decide
+   * the height instead of the panel's height deciding both.
+   *
+   * This is what a surveillance viewport wants: the box is exactly the shape of
+   * the camera, so the frame fills it edge to edge with no letterbox and
+   * nothing cropped, and the overlay rect equals the box. Without it the box is
+   * stretched to whatever the panel allows and `cover` has to crop away the
+   * mismatch.
+   */
+  aspect?: string
 }) {
   // Geometry is recomputed only when the payloads or the frame size change —
   // never per animation frame. The component does no inference of its own: it
@@ -473,12 +485,19 @@ export function LiveCameraFeed({
     <div
       ref={boxRef}
       className={`relative overflow-hidden bg-black ${
-        // `flex-1` only stretches when the parent row has a definite height.
-        // In a content-sized grid row (the stacked layout below the two-column
-        // breakpoint) it collapses to zero and the camera reads as a black
-        // panel, so the fill branch keeps a hard floor.
-        fill ? 'min-h-[12rem] w-full flex-1' : 'w-full'
+        // An aspect-locked box is sized by its width, so it must not also be
+        // stretched by the parent row.
+        aspect
+          ? 'w-full'
+          : // `flex-1` only stretches when the parent row has a definite height.
+            // In a content-sized grid row (the stacked layout below the
+            // two-column breakpoint) it collapses to zero and the camera reads
+            // as a black panel, so the fill branch keeps a hard floor.
+            fill
+            ? 'min-h-[12rem] w-full flex-1'
+            : 'w-full'
       }`}
+      style={aspect ? { aspectRatio: aspect } : undefined}
     >
       {/*
         The image fills the box; `fit` decides whether the frame is fitted
