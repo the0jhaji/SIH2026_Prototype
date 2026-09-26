@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   buildOverlay,
   resolveFrameSize,
@@ -386,6 +386,8 @@ export function LiveCameraFeed({
   frameHeight = null,
   hazardLevels = null,
   unattendedIds = null,
+  fill = false,
+  fit = 'contain',
 }: {
   streamUrl: string
   detections?: Detection[]
@@ -394,6 +396,22 @@ export function LiveCameraFeed({
   frameHeight?: number | null
   hazardLevels?: Record<string, string> | null
   unattendedIds?: ReadonlySet<string> | null
+  /**
+   * Stretch the frame to its container. The overlay is aligned by measuring
+   * the letterboxed image rect, not by percentage-guessing, so the boxes
+   * stay on the objects at any container shape.
+   */
+  fill?: boolean
+  /**
+   * How the frame fills its box.
+   *
+   * `contain` (default) shows the whole frame and letterboxes the remainder.
+   * `cover` fills the box completely and crops the overflow, which is what a
+   * monitoring wall wants when empty margins are worse than losing the very
+   * edge of the picture. Either way the overlay is positioned on the measured
+   * image rect, so the boxes stay glued to the objects.
+   */
+  fit?: 'contain' | 'cover'
 }) {
   // Geometry is recomputed only when the payloads or the frame size change —
   // never per animation frame. The component does no inference of its own: it
@@ -411,22 +429,89 @@ export function LiveCameraFeed({
     [frameWidth, frameHeight],
   )
 
+  // Measured content rect, in px, of the rendered image. With `contain` the
+  // rect is inset inside the box (letterbox margins); with `cover` it is
+  // larger than the box and offset negatively, and the box's overflow clips
+  // the cropped edges. The overlay is positioned on this rect in both cases,
+  // which is what keeps the boxes correct on the *displayed* pixels.
+  const boxRef = useRef<HTMLDivElement>(null)
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null)
+  const [content, setContent] = useState<{ w: number; h: number; left: number; top: number } | null>(null)
+
+  useLayoutEffect(() => {
+    const el = boxRef.current
+    if (!el) return
+    const measure = () => {
+      const cw = el.clientWidth
+      const ch = el.clientHeight
+      if (cw <= 0 || ch <= 0) {
+        setContent(null)
+        return
+      }
+      const nw = natural?.w ?? frame?.width ?? null
+      const nh = natural?.h ?? frame?.height ?? null
+      if (nw == null || nh == null || nw <= 0 || nh <= 0) {
+        setContent(null)
+        return
+      }
+      // contain fits the whole frame inside the box; cover fills the box and
+      // lets the overflow be cropped. This is the displayedWidth/frameWidth
+      // scaling the overlay is drawn against.
+      const scale =
+        fit === 'cover' ? Math.max(cw / nw, ch / nh) : Math.min(cw / nw, ch / nh)
+      const w = nw * scale
+      const h = nh * scale
+      setContent({ w, h, left: (cw - w) / 2, top: (ch - h) / 2 })
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [natural, frame, fit])
+
   return (
-    <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-slate-200 dark:border-slate-800 dark:bg-slate-950">
+    <div
+      ref={boxRef}
+      className={`relative overflow-hidden bg-black ${
+        // `flex-1` only stretches when the parent row has a definite height.
+        // In a content-sized grid row (the stacked layout below the two-column
+        // breakpoint) it collapses to zero and the camera reads as a black
+        // panel, so the fill branch keeps a hard floor.
+        fill ? 'min-h-[12rem] w-full flex-1' : 'w-full'
+      }`}
+    >
       {/*
-        The overlay must line up with the *rendered image*, not with this
-        container. A `w-fit` wrapper shrink-wraps the image (which keeps its own
-        aspect ratio via max-w/max-h) and the absolutely-positioned box layer
-        then shares the exact same rect — so a 640x640 or 4:3 frame is letterboxed
-        rather than cropped and every percentage stays true.
+        The image fills the box; `fit` decides whether the frame is fitted
+        inside it or cropped to it. The overlay is then positioned on the
+        *measured* image rect (see `content` above), so it tracks the picture
+        exactly — the old percentage-of-container approach drifted as soon as
+        the container aspect differed from the camera's.
       */}
-      <div className="relative mx-auto block w-fit max-w-full">
-        <img
-          src={streamUrl}
-          alt="Live camera feed"
-          className="block h-auto max-h-[75vh] w-auto max-w-full"
-        />
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+      <img
+        src={streamUrl}
+        alt="Live camera feed"
+        onLoad={e => {
+          const img = e.currentTarget
+          if (img.naturalWidth > 0 && (img.naturalWidth !== natural?.w || img.naturalHeight !== natural?.h)) {
+            setNatural({ w: img.naturalWidth, h: img.naturalHeight })
+          }
+        }}
+        className={`block ${
+          fill
+            ? `absolute inset-0 h-full w-full object-${fit}`
+            : `h-auto w-full object-${fit}`
+        }`}
+      />
+      {content && (
+        <div
+          className="pointer-events-none absolute overflow-hidden"
+          style={{
+            left: content.left,
+            top: content.top,
+            width: content.w,
+            height: content.h,
+          }}
+        >
           {overlay.map(box => (
             <div
               key={box.key}
@@ -458,12 +543,12 @@ export function LiveCameraFeed({
             </div>
           ))}
         </div>
-      </div>
-      <span className="pointer-events-none absolute left-3.5 top-3 z-30 rounded bg-black/55 px-2 py-0.5 font-mono text-[11px] font-bold tracking-wide text-slate-200">
+      )}
+      <span className="pointer-events-none absolute left-2 top-2 z-30 bg-black/55 px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-wide text-slate-200">
         CAM-01 · LIVE FEED
       </span>
       {import.meta.env.DEV && (
-        <span className="pointer-events-none absolute right-3.5 top-3 z-30 rounded bg-black/70 px-2 py-0.5 font-mono text-[10px] font-bold tracking-wide text-amber-300">
+        <span className="pointer-events-none absolute right-2 top-2 z-30 bg-black/70 px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-wide text-amber-300">
           {frame ? `Frame: ${frame.width} x ${frame.height}` : 'Frame: —'} · Known: {detections.length} ·
           Unknown: {unknownDetections.length}
         </span>
@@ -481,6 +566,8 @@ export function LiveFeed({
   frameHeight = null,
   hazardLevels = null,
   unattendedIds = null,
+  fill = false,
+  fit = 'contain',
 }: {
   state: ExperimentState
   streamUrl?: string | null
@@ -490,6 +577,8 @@ export function LiveFeed({
   frameHeight?: number | null
   hazardLevels?: Record<string, string> | null
   unattendedIds?: ReadonlySet<string> | null
+  fill?: boolean
+  fit?: 'contain' | 'cover'
 }) {
   if (streamUrl) {
     return (
@@ -501,6 +590,8 @@ export function LiveFeed({
         frameHeight={frameHeight}
         hazardLevels={hazardLevels}
         unattendedIds={unattendedIds}
+        fill={fill}
+        fit={fit}
       />
     )
   }

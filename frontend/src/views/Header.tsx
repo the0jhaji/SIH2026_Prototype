@@ -11,7 +11,6 @@ import { VIEW_TITLES } from './nav'
 
 interface Props {
   view: ViewKey
-  status: string
   running: boolean
   recording: boolean
   mode: ExperimentMode
@@ -30,7 +29,6 @@ interface Props {
 
 export function Header({
   view,
-  status: _status,
   running,
   recording,
   mode,
@@ -56,26 +54,33 @@ export function Header({
 
   const camRunning = camera?.running === true && !cameraOffline
   const detectionOk = detection?.inferenceStatus === 'ok' && !detectionOffline
-  const mission = safetyOffline ? 'OFFLINE' : safety?.mission_state ?? 'STANDBY'
+  const mission = safetyOffline ? 'OFFLINE' : (safety?.mission_state ?? 'STANDBY')
   const missionOk = !safetyOffline && (safety?.monitoring ?? false) && !safety?.feed_stale
   const missionColor = safetyOffline ? '#64748b' : MISSION_COLORS[safety?.mission_state ?? 'NORMAL']
   const monitoring = safety?.monitoring ?? false
   const canStart = mode === 'local' ? !running : connected && !running
 
   return (
-    <header className="fixed inset-x-0 top-0 z-30 flex h-14 items-center border-b border-outline-variant/50 bg-surface pl-24 pr-3">
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="font-mono text-sm font-bold uppercase tracking-[0.2em] text-primary">
-          Astra AI
+    <header className="app-head flex items-center gap-3 border-b border-outline-variant/50 bg-surface px-3">
+      <div className="flex min-w-0 shrink items-center gap-2">
+        <img
+          src="/astra-logo.png"
+          alt="ASTRA"
+          className="size-7 shrink-0 rounded object-cover"
+        />
+        <span className="whitespace-nowrap font-mono text-[13px] font-bold uppercase tracking-[0.18em] text-primary">
+          Astra
         </span>
-        <span className="font-mono text-[10px] uppercase tracking-widest text-on-surface-variant">
+        <span className="truncate font-mono text-[10px] uppercase tracking-widest text-on-surface-variant">
           /&nbsp;{VIEW_TITLES[view]}
         </span>
       </div>
 
-      <div className="ml-auto flex items-center gap-2">
+      {/* The status cluster scrolls horizontally instead of pushing the
+          transport controls off-screen at 1280px. */}
+      <div className="scroll-x flex min-w-0 flex-1 items-center justify-end gap-1.5">
         <Chip
-          label="MISSION STATE"
+          label="Mission state"
           value={mission}
           running={missionOk}
           accent="primary"
@@ -83,43 +88,43 @@ export function Header({
           pulse={safety?.mission_state === 'EMERGENCY' || safety?.mission_state === 'CRITICAL'}
         />
         <Chip
-          label="MONITOR"
-          value={monitoring ? (safety?.feed_stale ? 'STALE FEED' : 'ONLINE') : 'OFF'}
+          label="Monitor"
+          value={monitoring ? (safety?.feed_stale ? 'stale feed' : 'online') : 'off'}
           running={monitoring && !safety?.feed_stale}
           accent="tertiary"
         />
         <Chip
-          label="AI ENGINE"
+          label="AI engine"
           value={
             detectionOk
-              ? detection?.detector ?? 'DETECTOR'
+              ? (detection?.detector ?? 'detector')
               : detection?.error
-                ? 'ERROR'
-                : 'OFFLINE'
+                ? 'error'
+                : 'offline'
           }
           running={detectionOk}
           accent="tertiary"
         />
         <Chip
-          label="CAM-01"
-          value={camRunning ? `${camera.width}×${camera.height}` : 'OFFLINE'}
+          label="Camera"
+          value={camRunning ? `${camera.width}×${camera.height}` : 'offline'}
           running={camRunning}
           accent="secondary"
         />
         <Chip
-          label="PROCESSING"
-          value={recording ? 'REC' : busy ? 'BUSY' : 'IDLE'}
+          label="Processing"
+          value={recording ? 'rec' : busy ? 'busy' : 'idle'}
           running={recording || busy}
           accent="secondary"
         />
+      </div>
 
-        <span className="mx-1 w-px self-stretch bg-outline-variant/50" />
-
+      <div className="flex shrink-0 items-center gap-1.5">
         <span className="font-mono text-xs tabular-nums text-on-surface">
           {formatClock(now)} <span className="text-on-surface-variant">UTC</span>
         </span>
 
-        <span className="mx-1 w-px self-stretch bg-outline-variant/50" />
+        <span className="w-px self-stretch bg-outline-variant/50" />
 
         <select
           aria-label="Perception source"
@@ -134,35 +139,25 @@ export function Header({
         <button
           type="button"
           onClick={toggle}
-          className="btn-ghost px-2"
+          className="btn-ghost px-1.5 py-1"
           title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
         >
-          <span className="msym text-lg leading-none">
+          <span className="msym text-base leading-none">
             {theme === 'dark' ? 'light_mode' : 'dark_mode'}
           </span>
         </button>
 
-        <button
-          type="button"
-          onClick={onStart}
-          disabled={!canStart || busy}
-          className="btn-primary"
-        >
-          <span className="msym text-lg leading-none">play_arrow</span>
+        <button type="button" onClick={onStart} disabled={!canStart || busy} className="btn-primary px-3 py-1.5">
+          <span className="msym text-base leading-none">play_arrow</span>
           Start
         </button>
-        <button
-          type="button"
-          onClick={onStop}
-          disabled={!running || busy}
-          className="btn-outline"
-        >
-          <span className="msym text-lg leading-none">stop</span>
+        <button type="button" onClick={onStop} disabled={!running || busy} className="btn-outline px-3 py-1.5">
+          <span className="msym text-base leading-none">stop</span>
           Stop
         </button>
 
         <div
-          className="ml-1 flex h-8 w-8 items-center justify-center border border-outline-variant/60 bg-surface-container-high font-mono text-[11px] font-bold text-primary"
+          className="flex h-6 w-6 items-center justify-center border border-outline-variant/60 bg-surface-container-high font-mono text-[10px] font-bold text-primary"
           title="Operator"
         >
           OP
@@ -195,16 +190,18 @@ function Chip({
   const color = dot ?? fallback
   const isHex = color.startsWith('#')
   return (
-    <div className="hidden flex-col items-start justify-center border border-outline-variant/40 bg-surface-container-low px-2 py-1 md:flex">
-      <span className="font-mono text-[8px] uppercase tracking-widest text-on-surface-variant">
+    <div className="flex shrink-0 flex-col items-start justify-center border border-outline-variant/40 bg-surface-container-low px-1.5 py-0.5">
+      {/* Label only when there is width for it; below 1536px the value plus
+          dot still identify the channel, and nothing is lost but repetition. */}
+      <span className="hidden whitespace-nowrap font-mono text-[8px] uppercase leading-tight tracking-widest text-on-surface-variant 2xl:block">
         {label}
       </span>
-      <span className="flex items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-wider text-on-surface">
+      <span className="flex items-center gap-1 font-mono text-[10px] font-bold uppercase leading-tight tracking-wider text-on-surface">
         <span
-          className={`h-1.5 w-1.5 ${running ? (pulse ? 'animate-ping' : 'animate-pulse') : 'bg-outline'} ${!isHex && running ? color : ''}`}
+          className={`h-1.5 w-1.5 shrink-0 ${running ? (pulse ? 'animate-ping' : 'animate-pulse') : 'bg-outline'} ${!isHex && running ? color : ''}`}
           style={isHex ? { background: running ? color : undefined } : undefined}
         />
-        {value}
+        <span className="max-w-[7.5rem] truncate">{value}</span>
       </span>
     </div>
   )

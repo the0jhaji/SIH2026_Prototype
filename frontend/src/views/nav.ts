@@ -29,12 +29,33 @@ export const NAV_ITEMS: NavItem[] = [
 
 export const VIEW_TITLES: Record<ViewKey, string> = {
   mission: 'Mission Status',
-  camera: 'Live Camera & Detection',
+  camera: 'Live Observation',
   assessment: 'Hazard Assessment',
-  astronaut: 'Astronaut Status',
+  astronaut: 'Crew Status',
   alerts: 'Active Alerts',
-  station: 'Mission Control / Space Station',
+  station: 'Station Systems',
   escalation: 'Earth Escalation',
-  incidents: 'Incident History',
-  experiments: 'Legacy Experiment Demo',
+  incidents: 'Mission Logs',
+  experiments: 'Experiment Demo',
+}
+
+/**
+ * Per-view information density. Set once on the shell as `data-density`;
+ * every card, gap and page padding derives from it, so a dense monitoring
+ * screen and a media-focused screen stay consistent without per-card
+ * styling. Monitoring views are compact, the camera and experiment views
+ * give their imagery room, the rest are normal.
+ */
+export type Density = 'compact' | 'normal' | 'focus'
+
+export const VIEW_DENSITY: Record<ViewKey, Density> = {
+  mission: 'compact',
+  camera: 'focus',
+  assessment: 'normal',
+  astronaut: 'normal',
+  alerts: 'normal',
+  station: 'normal',
+  escalation: 'normal',
+  incidents: 'normal',
+  experiments: 'focus',
 }

@@ -1,31 +1,22 @@
+import { useMemo } from 'react'
 import { CAMERA_STREAM_URL } from '../domain/camera'
 import { expectedStep } from '../domain/experiment'
-import type { CameraInfo } from '../domain/camera'
-import type { DetectionResult } from '../domain/detection'
-import type { ExperimentMode } from '../hooks/useExperiment'
-import type { EngineSnapshot } from '../hooks/useExperimentEngine'
-import type { ExperimentState } from '../domain/types'
+import { MISSION_COLORS } from '../domain/safety'
 import { LiveFeed } from '../components/LiveFeed'
-import { ExperimentPanel } from '../components/ExperimentPanel'
+import { CameraStage } from '../components/CameraStage'
+import { Badge, Empty, EmptyState, KeyValue, MetricCard, Panel, StatTile, SubCard } from './ui'
+import { PageShell, Timeline } from './layout'
+import { basEventEntries, severityColor } from './helpers'
+import type { SafetyCommonProps } from './props'
 
-interface Props {
-  state: ExperimentState
-  mode: ExperimentMode
-  camera: CameraInfo | null
-  cameraRunning: boolean
-  cameraSending: boolean
-  cameraOffline: boolean
-  onCameraStart: () => void
-  onCameraStop: () => void
-  detection: DetectionResult | null
+type Props = SafetyCommonProps & {
   connected: boolean
   busy: boolean
   onStart: () => void
   onStop: () => void
-  engineSnapshot: EngineSnapshot | null
-  engineOffline: boolean
   onEngineStart: () => void
   onEngineStop: () => void
+  cameraSending: boolean
 }
 
 const ACTION_LABEL: Record<string, string> = {
@@ -34,232 +25,494 @@ const ACTION_LABEL: Record<string, string> = {
   OPEN: 'Open',
 }
 
+const RESULT_TONE: Record<string, string> = {
+  CORRECT: '#22c55e',
+  OUT_OF_SEQUENCE: '#f97316',
+  SKIPPED: '#facc15',
+  REPEATED: '#facc15',
+  UNKNOWN: '#64748b',
+  LOW_CONFIDENCE: '#f97316',
+}
+
+/**
+ * Legacy BAS experiment demo (view 9).
+ *
+ * The strongest operational screen: the procedure, the feed it is judged
+ * against and the classifier's reasoning share one row, so an operator can
+ * see why a step was accepted or rejected without leaving the view. The
+ * canvas feed is a *simulation* and says so on the frame; with the camera
+ * running the real MJPEG feed replaces it.
+ */
 export function ExperimentsView({
   state,
+  engine,
+  engineOffline,
   mode,
-  camera: _camera,
   cameraRunning,
-  cameraSending,
   cameraOffline,
+  cameraSending,
   onCameraStart,
   onCameraStop,
   detection,
+  attendance,
   connected,
   busy,
   onStart,
   onStop,
-  engineSnapshot,
-  engineOffline: _engineOffline,
   onEngineStart,
   onEngineStop,
 }: Props) {
   const running = state.status === 'RUNNING'
   const expected = expectedStep(state.experiment, state.currentStepIndex)
+  const total = state.experiment.steps.length
+  const done = state.completedStepIds.length
+  const progress = total > 0 ? Math.round((done / total) * 100) : 0
   const streamUrl = cameraRunning ? CAMERA_STREAM_URL : null
   const cameraDisabled = mode !== 'backend' || cameraSending || cameraOffline
-
-  const protocolCards = [
-    { id: 'ACTIVE', label: 'ACTIVE', sub: 'Loaded protocol', icon: 'science', active: true },
-    { id: 'DRAFT', label: 'DRAFT', sub: 'Uncommitted changes', icon: 'edit_note', active: false },
-    { id: 'ARCHIVE', label: 'ARCHIVE', sub: 'Previous runs', icon: 'inventory_2', active: false },
-  ]
+  const timeline = useMemo(() => basEventEntries(state.log, 50), [state.log])
+  const observed = state.currentDetected
+  const classification = state.lastClassification
+  const errorTotal = Object.values(state.errors).reduce((a, b) => a + b, 0)
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[15rem_1fr]">
-      {/* Protocol list */}
-      <section className="panel p-3">
-        <h2 className="heading-title">Protocols</h2>
-        <div className="mt-3 space-y-2">
-          {protocolCards.map(card => (
-            <button
-              key={card.id}
-              type="button"
-              className={`flex w-full items-center gap-2 border px-2.5 py-2 text-left transition ${
-                card.active
-                  ? 'border-primary/70 bg-primary/10 text-on-surface'
-                  : 'border-outline-variant/40 bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high'
-              }`}
-            >
-              <span className="msym text-xl leading-none">{card.icon}</span>
-              <span className="min-w-0">
-                <span className="block font-mono text-[11px] font-bold uppercase tracking-wider">
-                  {card.label}
-                </span>
-                <span className="block truncate font-mono text-[9px] text-on-surface-variant">
-                  {card.sub}
-                </span>
-              </span>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      {/* Details + procedure + camera */}
-      <div className="space-y-4">
-        {/* Engine panel (rich state + next-step + violations) */}
-        <ExperimentPanel
-          snapshot={engineSnapshot}
-          running={running}
-          onStart={onEngineStart}
-          onStop={onEngineStop}
-          busy={busy}
+    <PageShell>
+      {/* ── Run summary ──────────────────────────────────────────── */}
+      <div className="grid shrink-0 grid-cols-2 gap-[var(--grid-gap)] lg:grid-cols-4">
+        <MetricCard
+          label="Run status"
+          value={state.status}
+          sub={state.recording ? 'recording' : mode === 'backend' ? 'backend session' : 'local simulator'}
+          color={running ? MISSION_COLORS.NORMAL : '#64748b'}
+          active={running || state.recording}
         />
+        <MetricCard
+          label="Progress"
+          value={`${done}/${total}`}
+          sub={`${progress}% of the procedure matched`}
+          color={progress === 100 && total > 0 ? '#22c55e' : MISSION_COLORS.OBSERVING}
+          active={total > 0}
+        />
+        <MetricCard
+          label="Sequence errors"
+          value={String(errorTotal)}
+          sub={`oos ${state.errors.outOfSequence} · skip ${state.errors.skipped} · rep ${state.errors.repeated}`}
+          color={errorTotal > 0 ? '#f97316' : '#22c55e'}
+          active={errorTotal > 0}
+        />
+        <MetricCard
+          label="Engine"
+          value={engine ? engine.status.replace(/_/g, ' ') : engineOffline ? 'OFFLINE' : '—'}
+          sub={engine ? `voice ${engine.voice.health} · q${engine.voice.queue_size}` : 'no snapshot'}
+          color={engine ? '#38bdf8' : '#64748b'}
+          active={Boolean(engine)}
+        />
+      </div>
 
-        <section className="panel p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h2 className="heading-title">Protocol</h2>
-              <h1 className="mt-1 truncate font-sans text-2xl font-bold tracking-tight text-on-surface">
-                {state.experiment.name}
-              </h1>
-              <p className="mt-1 max-w-2xl text-sm text-on-surface-variant">
-                {state.experiment.description}
-              </p>
-            </div>
-            <div className="flex shrink-0 flex-col items-end gap-1.5">
-              <span className="chip border-primary/60 bg-primary/10 text-primary">
-                <span className={`h-1.5 w-1.5 rounded-full ${running ? 'animate-pulse bg-primary' : 'bg-outline'}`} />
-                {state.status}
+      {/* ── Protocol · feed · AI observation ─────────────────────── */}
+      <div className="page-fill grid-cols-1 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.5fr)_minmax(0,0.95fr)]">
+        {/* Protocol + procedure + controls */}
+        <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-[var(--grid-gap)] overflow-hidden">
+          <Panel
+            title="Protocol"
+            right={
+              <span className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">
+                {state.experiment.id}
               </span>
-              {state.recording && (
-                <span className="chip border-error/60 bg-error-container/20 text-error">
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-error" />
-                  REC
-                </span>
-              )}
-            </div>
-          </div>
-
-          <div className="mt-4 grid grid-cols-3 gap-2">
-            <Tile label="Steps" value={String(state.experiment.steps.length)} />
-            <Tile label="Completed" value={String(state.completedStepIds.length)} />
-            <Tile label="Source" value={mode === 'backend' ? 'Backend · FastAPI' : 'Local simulator'} />
-          </div>
-        </section>
-
-        <section className="panel p-4">
-          <div className="flex items-center justify-between">
-            <h2 className="heading-title">Session Media</h2>
-            <div className="flex gap-1.5">
-              <button
-                type="button"
-                onClick={onCameraStart}
-                disabled={cameraDisabled || cameraRunning}
-                className="btn-ghost"
-              >
-                <span className="msym text-lg leading-none">videocam</span>
-                CAM-01 ON
-              </button>
-              <button
-                type="button"
-                onClick={onCameraStop}
-                disabled={cameraDisabled || !cameraRunning}
-                className="btn-ghost"
-              >
-                <span className="msym text-lg leading-none">videocam_off</span>
-                OFF
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-3">
-            <LiveFeed
-              state={state}
-              streamUrl={streamUrl}
-              detections={cameraRunning ? detection?.detections ?? [] : []}
-              unknownDetections={cameraRunning ? detection?.unknownDetections ?? [] : []}
-              frameWidth={cameraRunning ? detection?.frameWidth ?? null : null}
-              frameHeight={cameraRunning ? detection?.frameHeight ?? null : null}
-            />
-          </div>
-
-          {cameraOffline && mode === 'backend' && (
-            <p className="mt-2 font-mono text-[11px] text-secondary">
-              Backend unreachable — camera controls unavailable.
+            }
+          >
+            <p className="font-mono text-sm font-semibold leading-tight">{state.experiment.name}</p>
+            <p className="mt-0.5 font-mono text-[10px] leading-snug text-on-surface-variant">
+              {state.experiment.description}
             </p>
-          )}
-        </section>
+          </Panel>
 
-        <section className="panel p-4">
-          <h2 className="heading-title">Procedure</h2>
-          <ol className="mt-3 space-y-1.5">
-            {state.experiment.steps.map((step, i) => {
-              const done = state.completedStepIds.includes(step.id)
-              const current = running && expected?.id === step.id
-              return (
-                <li
-                  key={step.id}
-                  className={`flex items-center gap-3 border px-3 py-2 ${
-                    done
-                      ? 'border-secondary/50 bg-secondary/10 text-on-surface'
-                      : current
-                        ? 'border-primary/70 bg-primary/10 text-on-surface'
-                        : 'border-outline-variant/30 bg-surface-container-low text-on-surface-variant'
-                  }`}
-                >
-                  <span
-                    className={`flex h-6 w-6 shrink-0 items-center justify-center font-mono text-[11px] font-bold ${
-                      done
-                        ? 'bg-secondary text-black'
-                        : current
-                          ? 'bg-primary text-black'
-                          : 'border border-outline-variant/50'
-                    }`}
+          <Panel
+            title="Procedure"
+            fill
+            scroll
+            right={
+              <span className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">
+                {done}/{total}
+              </span>
+            }
+          >
+            <ol className="rows">
+              {state.experiment.steps.map((step, i) => {
+                const isDone = state.completedStepIds.includes(step.id)
+                const isCurrent = running && expected?.id === step.id
+                return (
+                  <li
+                    key={step.id}
+                    className="flex items-center gap-2 border px-2 py-1.5"
+                    style={{
+                      borderColor: isDone
+                        ? 'color-mix(in oklab, #22c55e 45%, transparent)'
+                        : isCurrent
+                          ? 'color-mix(in oklab, var(--color-primary) 60%, transparent)'
+                          : 'color-mix(in oklab, var(--t-outline-variant) 30%, transparent)',
+                      background: isCurrent ? 'color-mix(in oklab, var(--color-primary) 10%, transparent)' : undefined,
+                    }}
                   >
-                    {done ? '✓' : i + 1}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-sans text-sm font-medium">{step.label}</p>
-                    <p className="font-mono text-[9px] uppercase tracking-widest text-on-surface-variant">
-                      {ACTION_LABEL[step.action ?? ''] ?? step.action} · {step.activity}
+                    <span
+                      className="flex h-5 w-5 shrink-0 items-center justify-center font-mono text-[10px] font-bold"
+                      style={{
+                        background: isDone ? '#22c55e' : isCurrent ? 'var(--color-primary)' : 'transparent',
+                        border: isDone || isCurrent ? 'none' : '1px solid var(--t-outline-variant)',
+                        color: isDone || isCurrent ? '#020617' : 'var(--color-on-surface-variant)',
+                      }}
+                    >
+                      {isDone ? '✓' : i + 1}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-mono text-[11px]">{step.label}</span>
+                      <span className="block truncate font-mono text-[9px] uppercase tracking-widest text-on-surface-variant">
+                        {ACTION_LABEL[step.action ?? ''] ?? step.action} · {step.activity}
+                      </span>
+                    </span>
+                    {isCurrent && (
+                      <span className="shrink-0 font-mono text-[9px] font-bold uppercase tracking-widest text-primary">
+                        Next
+                      </span>
+                    )}
+                  </li>
+                )
+              })}
+            </ol>
+          </Panel>
+
+          <Panel title="Session Control" className="shrink-0">
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={onStart}
+                disabled={mode === 'backend' ? !connected || running || busy : running || busy}
+                className="btn-primary px-2 py-1.5"
+              >
+                <span className="msym text-base leading-none">rocket_launch</span>
+                {running ? 'Running' : 'Start'}
+              </button>
+              <button type="button" onClick={onStop} disabled={!running || busy} className="btn-outline px-2 py-1.5">
+                <span className="msym text-base leading-none">stop</span>
+                Stop
+              </button>
+            </div>
+            <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={onEngineStart}
+                disabled={running || busy}
+                className="btn-outline px-2 py-1.5"
+              >
+                <span className="msym text-base leading-none">account_tree</span>
+                Engine start
+              </button>
+              <button
+                type="button"
+                onClick={onEngineStop}
+                disabled={!running || busy}
+                className="btn-outline px-2 py-1.5"
+              >
+                <span className="msym text-base leading-none">pause</span>
+                Engine stop
+              </button>
+            </div>
+            {mode === 'backend' && !connected && (
+              <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-secondary">
+                Backend offline — controls disabled.
+              </p>
+            )}
+          </Panel>
+        </div>
+
+        {/* Feed: the one element allowed to claim leftover height */}
+        <Panel
+          title="Session Media"
+          fill
+          scroll={false}
+          right={
+            <span className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">
+              {streamUrl ? 'CAM-01 live' : 'canvas simulation'}
+            </span>
+          }
+        >
+          <div className="flex min-h-0 flex-1 flex-col gap-2">
+            {cameraRunning ? (
+              <CameraStage
+                running
+                offline={false}
+                detections={detection.result?.detections ?? []}
+                unknownDetections={detection.result?.unknownDetections ?? []}
+                frameWidth={detection.result?.frameWidth ?? null}
+                frameHeight={detection.result?.frameHeight ?? null}
+                unattendedIds={new Set(
+                  (attendance.result?.watches ?? [])
+                    .filter(w => w.state === 'UNATTENDED')
+                    .map(w => w.instanceId),
+                )}
+                fill
+                disabled={cameraDisabled}
+                onStart={onCameraStart}
+                onStop={onCameraStop}
+              />
+            ) : (
+              <>
+                <LiveFeed state={state} />
+                {mode === 'backend' ? (
+                  <div>
+                    <div className="mb-1 grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={onCameraStart}
+                        disabled={cameraDisabled}
+                        className="btn-outline px-2 py-1.5"
+                      >
+                        <span className="msym text-base leading-none">videocam</span>
+                        CAM-01 ON
+                      </button>
+                      <button
+                        type="button"
+                        onClick={onCameraStop}
+                        disabled={cameraDisabled || !cameraRunning}
+                        className="btn-outline px-2 py-1.5"
+                      >
+                        <span className="msym text-base leading-none">videocam_off</span>
+                        CAM OFF
+                      </button>
+                    </div>
+                    <p className="font-mono text-[10px] leading-snug text-on-surface-variant">
+                      {cameraOffline
+                        ? 'Backend unreachable — camera controls unavailable.'
+                        : 'The canvas above is a simulation of the procedure. Start CAM-01 to replace it with the real feed.'}
                     </p>
                   </div>
-                  {current && (
-                    <span className="font-mono text-[9px] font-bold uppercase tracking-widest text-primary">
-                      Next ▸
-                    </span>
-                  )}
-                </li>
-              )
-            })}
-          </ol>
-
-          <div className="mt-4 flex items-center gap-3 border-t border-outline-variant/40 pt-4">
-            <button
-              type="button"
-              onClick={onStart}
-              disabled={mode === 'backend' ? !connected || running || busy : running || busy}
-              className="btn-primary"
-            >
-              <span className="msym text-lg leading-none">rocket_launch</span>
-              {running ? 'Running…' : 'Start Experiment'}
-            </button>
-            <button
-              type="button"
-              onClick={onStop}
-              disabled={!running || busy}
-              className="btn-outline"
-            >
-              <span className="msym text-lg leading-none">stop</span>
-              Stop
-            </button>
-            {mode === 'backend' && !connected && (
-              <span className="font-mono text-[10px] uppercase tracking-wider text-secondary">
-                Backend offline
-              </span>
+                ) : (
+                  <p className="font-mono text-[10px] leading-snug text-on-surface-variant">
+                    Local simulator mode: the canvas is the feed. Switch to Backend in the header to
+                    use the real camera.
+                  </p>
+                )}
+              </>
             )}
           </div>
-        </section>
-      </div>
-    </div>
-  )
-}
+        </Panel>
 
-function Tile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="tile px-2 py-1.5 text-center">
-      <p className="overline-label">{label}</p>
-      <p className="copy-value">{value}</p>
-    </div>
+        {/* AI observation */}
+        <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-[var(--grid-gap)] overflow-hidden">
+          <Panel
+            title="AI Observation"
+            fill
+            scroll
+            right={
+              <Badge color={observed ? MISSION_COLORS.OBSERVING : '#64748b'}>
+                {observed ? 'interpreting' : 'idle'}
+              </Badge>
+            }
+          >
+            {observed ? (
+              <div className="stack">
+                <SubCard
+                  title="Current activity"
+                  right={
+                    <span className="font-mono text-[10px] text-on-surface-variant">
+                      {Math.round(observed.confidence * 100)}%
+                    </span>
+                  }
+                >
+                  <p className="font-mono text-[11px] font-bold uppercase tracking-wider">
+                    {observed.activity?.replace(/_/g, ' ') ?? 'No interpretation'}
+                  </p>
+                  <p className="mt-0.5 font-mono text-[10px] text-on-surface-variant">
+                    Perception emits an activity with a confidence; the state machine decides whether
+                    it is valid — never the model.
+                  </p>
+                </SubCard>
+                <SubCard
+                  title="Last classification"
+                  right={
+                    classification?.result ? (
+                      <span
+                        className="font-mono text-[10px] font-bold uppercase tracking-wider"
+                        style={{ color: RESULT_TONE[classification.result] ?? '#64748b' }}
+                      >
+                        {classification.result.replace(/_/g, ' ')}
+                      </span>
+                    ) : null
+                  }
+                >
+                  {classification ? (
+                    <>
+                      <p className="font-mono text-[11px] font-semibold uppercase tracking-wider">
+                        {classification.kind.replace(/_/g, ' ')}
+                      </p>
+                      <p className="mt-0.5 font-mono text-[10px] leading-snug text-on-surface">
+                        {classification.message}
+                      </p>
+                      <p className="mt-0.5 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant">
+                        {classification.expected ? `expected ${classification.expected} · ` : ''}
+                        {classification.confidence != null
+                          ? `${Math.round(classification.confidence * 100)}%`
+                          : '—'}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="font-mono text-[10px] text-on-surface-variant">
+                      No step has been classified yet.
+                    </p>
+                  )}
+                </SubCard>
+                {engine?.last_activity && (
+                  <SubCard title="Engine last activity">
+                    <KeyValue label="Step" value={engine.last_activity.label} />
+                    <KeyValue label="Activity" value={engine.last_activity.activity} />
+                    <KeyValue
+                      label="Confidence"
+                      value={`${Math.round(engine.last_activity.confidence * 100)}%`}
+                    />
+                  </SubCard>
+                )}
+                <SubCard title="Sequence error counters">
+                  <div className="grid grid-cols-2 gap-[var(--row-pad)]">
+                    <StatTile label="Out of sequence" value={String(state.errors.outOfSequence)} />
+                    <StatTile label="Skipped" value={String(state.errors.skipped)} />
+                    <StatTile label="Repeated" value={String(state.errors.repeated)} />
+                    <StatTile label="Unknown" value={String(state.errors.unknown)} />
+                  </div>
+                </SubCard>
+                {engine && engine.violations.length > 0 && (
+                  <SubCard title={`Violations (${engine.violation_count})`}>
+                    <ul className="rows">
+                      {engine.violations.map((v, i) => (
+                        <li key={`${v.kind}-${i}`} className="truncate font-mono text-[10px]">
+                          <span className="font-bold uppercase tracking-wider text-error">
+                            {v.kind.replace(/_/g, ' ')}
+                          </span>{' '}
+                          <span className="text-on-surface-variant">{v.message}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </SubCard>
+                )}
+              </div>
+            ) : (
+              <EmptyState
+                icon="psychology"
+                title="No activity interpreted"
+                description={
+                  running
+                    ? 'The perception layer has not produced an activity for the current frame. It never guesses to keep the procedure moving.'
+                    : 'Start the experiment to feed frames to the perception layer.'
+                }
+                status={running ? 'Waiting for a valid frame' : 'Experiment not running'}
+              />
+            )}
+          </Panel>
+
+          <Panel title="Expected Next" className="shrink-0">
+            {expected ? (
+              <>
+                <p className="font-mono text-[11px] font-semibold leading-tight">{expected.label}</p>
+                <p className="mt-0.5 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant">
+                  step {state.currentStepIndex + 1} of {total} · {expected.activity}
+                </p>
+              </>
+            ) : (
+              <Empty label="Procedure complete — no step is expected." />
+            )}
+          </Panel>
+        </div>
+      </div>
+
+      {/* ── Timeline + object tracking ───────────────────────────── */}
+      <div
+        className="page-fill shrink-0 grid-cols-1 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]"
+        style={{ height: 'var(--strip-h)', flex: 'none' }}
+      >
+        <Panel
+          title="Experiment Timeline"
+          fill
+          scroll
+          accent={errorTotal > 0 ? '#f97316' : undefined}
+          right={
+            <span className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">
+              {timeline.length} events
+            </span>
+          }
+        >
+          <Timeline
+            entries={timeline}
+            empty={
+              <EmptyState
+                icon="timeline"
+                title="No experiment events"
+                description="Step matches, sequence violations and session transitions are recorded here in order."
+              />
+            }
+          />
+        </Panel>
+
+        <Panel
+          title="Object Tracking"
+          fill
+          scroll
+          right={
+            <span className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">
+              {detection.result?.detections.length ?? 0} detected
+            </span>
+          }
+        >
+          {(() => {
+            const detections = detection.result?.detections ?? []
+            const watches = attendance.result?.watches ?? []
+            if (detections.length === 0 && watches.length === 0) {
+              return (
+                <EmptyState
+                  compact
+                  icon="track_changes"
+                  title="No tracked objects"
+                  description="Detected objects and their held/unattended state appear here. Object-level classes require the experiment detector — a generic YOLO cannot see the box classes."
+                />
+              )
+            }
+            return (
+              <div className="stack">
+                {detections.length > 0 && (
+                  <SubCard title={`Detections (${detections.length})`}>
+                    <ul className="rows">
+                      {detections.slice(0, 8).map(d => (
+                        <li key={`${d.class_name}-${d.x1}-${d.y1}`} className="truncate font-mono text-[10px]">
+                          <span className="font-bold uppercase tracking-wider">{d.class_name}</span>{' '}
+                          <span className="text-on-surface-variant">
+                            {Math.round(d.confidence * 100)}% · {d.x1},{d.y1}–{d.x2},{d.y2}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </SubCard>
+                )}
+                {watches.length > 0 && (
+                  <SubCard title={`Attendance watches (${watches.length})`}>
+                    <ul className="rows">
+                      {watches.slice(0, 8).map(w => (
+                        <li
+                          key={w.instanceId}
+                          className="truncate font-mono text-[10px]"
+                          style={{ borderLeftWidth: 2, borderLeftColor: severityColor(w.state) }}
+                        >
+                          <span className="font-bold uppercase tracking-wider">{w.className}</span>{' '}
+                          <span className="text-on-surface-variant">
+                            {w.state.replace(/_/g, ' ')} ·{' '}
+                            {w.personId ? `held by ${w.personId}` : 'no crew'}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </SubCard>
+                )}
+              </div>
+            )
+          })()}
+        </Panel>
+      </div>
+    </PageShell>
   )
 }

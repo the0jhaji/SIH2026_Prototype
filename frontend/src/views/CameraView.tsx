@@ -6,17 +6,14 @@ import {
   UNKNOWN_CLASS,
   hazardLevelsFrom,
   unattendedIdsFrom,
-  type DetectionResult,
-  type DetectionStatus,
+  type Detection,
 } from '../domain/detection'
+import { expectedStep } from '../domain/experiment'
 import { LiveCameraFeed } from '../components/LiveFeed'
-import { Empty, Panel, StatTile } from './ui'
+import { EmptyState, KeyValue, Panel, StatTile } from './ui'
+import { PageShell, Timeline } from './layout'
+import { attendanceEventEntries, basEventEntries, relativeAge, safetyEventEntries, severityColor, stateColor } from './helpers'
 import type { SafetyCommonProps } from './props'
-
-interface Props extends SafetyCommonProps {
-  detectionStatus: DetectionStatus | null
-  detectionResult: DetectionResult | null
-}
 
 /** Stage duration for the trace panel. `—` means the stage never ran, not 0 ms. */
 function fmtMs(value: number | null | undefined): string {
@@ -24,393 +21,613 @@ function fmtMs(value: number | null | undefined): string {
 }
 
 const STATE_TONE: Record<string, string> = {
-  UNATTENDED: 'text-error border-error/50 bg-error/10',  RELEASED: 'text-warning border-warning/50 bg-warning/10',
-  ATTENDED: 'text-tertiary border-outline-variant/40 bg-surface-container-low',
-  OBJECT_INSIDE_BOX: 'text-primary border-primary/40 bg-primary/10',
+  UNATTENDED: 'border-error/50 bg-error/10',
+  RELEASED: 'border-warning/50 bg-warning/10',
+  ATTENDED: 'border-outline-variant/40 bg-surface-container-low',
+  OBJECT_INSIDE_BOX: 'border-primary/40 bg-primary/10',
 }
 
 function watchTone(state: string): string {
-  return STATE_TONE[state] ?? 'text-on-surface-variant border-outline-variant/40 bg-surface-container-low'
+  return STATE_TONE[state] ?? 'border-outline-variant/40 bg-surface-container-low'
 }
 
+const ACTION_LABEL: Record<string, string> = { PICK: 'Pick', PLACE: 'Place', OPEN: 'Open' }
+
+/** Row shares of the page height.
+ *
+ *  The video is height-bound, not width-bound: a 16:9 source in a panel this
+ *  wide is always limited by the height it is given, so the only way to make
+ *  the feed larger is to hand its row more of the page. The cards and the
+ *  monitoring strip keep their own content and layout — they just take a
+ *  smaller slice, and both scroll internally, so no region is left blank. */
+const CAMERA_ROW = '1 1 74%'
+const INTEL_ROW = '1 1 15%'
+const MONITOR_ROW = '1 1 11%'
+
+/**
+ * LIVE OBSERVATION — the camera is the page.
+ *
+ * The live frame is the primary element: it fills a 16:9 box sized from the
+ * camera's own resolution (never stretched, `object-contain` inside a box that
+ * already matches the frame aspect), with the transport controls docked
+ * directly beneath it. Everything else is intelligence *about* that frame —
+ * what the crew member is doing, what they are holding, where the procedure
+ * stands, and the raw telemetry — arranged so no region of the page is left
+ * blank.
+ *
+ * The picture and its overlay come from the same `LiveCameraFeed` the rest of
+ * the app uses, fed by `/api/camera/stream` and the backend's real
+ * `frameWidth`/`frameHeight`, so YOLO boxes, labels, tracking ids, confidence
+ * and the unknown/hazard/unattended markers land on the objects they describe.
+ * Nothing here is simulated: with the camera stopped the panel says so instead
+ * of inventing a frame.
+ */
 export function CameraView({
+  state,
+  engine,
+  camera,
   cameraRunning,
   cameraOffline,
   onCameraStart,
   onCameraStop,
   safety,
-  detectionResult,
-  detectionStatus,
+  detection,
   attendance,
-}: Props) {
-  const streamUrl = cameraRunning ? CAMERA_STREAM_URL : null
-  // The unknown feed is a separate stream from the recognised one and is merged
-  // only inside the overlay. It used to be dropped here entirely, which is why
-  // unknown boxes never appeared on this view.
-  const detections = cameraRunning ? detectionResult?.detections ?? [] : []
-  const unknownDetections = cameraRunning ? detectionResult?.unknownDetections ?? [] : []
-  const frameW = cameraRunning ? detectionResult?.frameWidth ?? null : null
-  const frameH = cameraRunning ? detectionResult?.frameHeight ?? null : null
-  const hazardLevels = useMemo(
-    () => hazardLevelsFrom(safety.snapshot?.assessments),
-    [safety.snapshot],
-  )
-  const unattendedIds = useMemo(
-    () => unattendedIdsFrom(attendance?.result?.watches),
-    [attendance],
-  )
+}: SafetyCommonProps) {
+  const status = detection.status
+  const result = detection.result
+  const streamRunning = cameraRunning
+  const detections = streamRunning ? (result?.detections ?? []) : []
+  const unknownDetections = streamRunning ? (result?.unknownDetections ?? []) : []
+  const frameW = streamRunning ? (result?.frameWidth ?? null) : null
+  const frameH = streamRunning ? (result?.frameHeight ?? null) : null
+  const hazardLevels = useMemo(() => hazardLevelsFrom(safety.snapshot?.assessments), [safety.snapshot])
+  const unattendedIds = useMemo(() => unattendedIdsFrom(attendance.result?.watches), [attendance])
   const allDetections = [...detections, ...unknownDetections]
+  const snapshot = safety.snapshot
+  const tone = stateColor(snapshot?.mission_state)
+  const activeAlerts = safety.alerts.filter(a => !a.resolved)
+
+  const expected = expectedStep(state.experiment, state.currentStepIndex)
+  const observed = state.currentDetected ?? null
+  const activityLabel = observed?.activity
+    ? observed.activity.replace(/_/g, ' ')
+    : (engine?.last_activity?.label ?? null)
+  const activityConfidence = observed?.confidence ?? engine?.last_activity?.confidence ?? null
+  const activityTs = observed?.ts ?? null
+
+  const watches = attendance.result?.watches ?? []
+  const nearAstronaut = watches.filter(w => w.personId != null)
+  const held = watches.find(w => w.state === 'HELD') ?? null
+  const interactionState = held
+    ? 'HELD'
+    : (attendance.status?.unattendedCount ?? 0) > 0
+      ? 'UNATTENDED'
+      : nearAstronaut.length > 0
+        ? 'IN CONTACT'
+        : watches.length > 0
+          ? 'TRACKING'
+          : 'NO CONTACT'
+
+  const activityTimeline = useMemo(() => basEventEntries(state.log, 40), [state.log])
+  const systemTimeline = useMemo(
+    () => [...safetyEventEntries(safety.events, 30), ...attendanceEventEntries(attendance.result?.events, 20)],
+    [safety.events, attendance.result?.events],
+  )
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_18rem]">
-      <div className="space-y-4">
+    <PageShell>
+      {/* ── 1. Live camera — the primary element ─────────────────────── */}
+      <div className="min-h-[15rem]" style={{ flex: CAMERA_ROW }}>
         <Panel
           title="Live Camera Feed"
+          fill
+          scroll={false}
+          accent={snapshot?.top_hazard ? BOX_COLORS.hazard : undefined}
           right={
-            <span className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">
-              CAM-01 · {cameraRunning ? 'LIVE' : 'STANDBY'}
+            <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+              CAM-01 · {streamRunning ? 'LIVE' : 'STANDBY'} · {detections.length + unknownDetections.length}{' '}
+              OBJECTS
             </span>
           }
         >
-          {cameraRunning ? (
-            <LiveCameraFeed
-              streamUrl={streamUrl ?? ''}
-              detections={detections}
-              unknownDetections={unknownDetections}
-              frameWidth={frameW}
-              frameHeight={frameH}
-              hazardLevels={hazardLevels}
-              unattendedIds={unattendedIds}
-            />
-          ) : (
-            <div className="flex aspect-video w-full items-center justify-center border border-outline-variant/30 bg-surface-container-low">
-              <p className="font-mono text-xs uppercase tracking-widest text-on-surface-variant">
-                {cameraOffline
-                  ? 'CAMERA OFFLINE'
-                  : 'No camera feed — press CAM ON to start the visual monitor'}
-              </p>
-            </div>
-          )}
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={onCameraStart}
-              disabled={cameraRunning || cameraOffline}
-              className="btn-primary"
-            >
-              CAM ON
-            </button>
-            <button
-              type="button"
-              onClick={onCameraStop}
-              disabled={!cameraRunning}
-              className="btn-outline"
-            >
-              CAM OFF
-            </button>
-          </div>
-        </Panel>
+          {streamRunning ? (
+            /* No height floor here: the row is flex-sized and the box takes all
+               of it, so the feed claims every pixel the panel can give it. */
+            <div className="flex min-h-0 flex-1 items-center justify-center">
+              <div className="flex h-full w-full flex-col">
+                <div className="relative flex min-h-0 flex-1 flex-col">
+                  <LiveCameraFeed
+                    streamUrl={CAMERA_STREAM_URL}
+                    detections={detections}
+                    unknownDetections={unknownDetections}
+                    frameWidth={frameW}
+                    frameHeight={frameH}
+                    hazardLevels={hazardLevels}
+                    unattendedIds={unattendedIds}
+                    fill
+                    fit="cover"
+                  />
 
-        <Panel
-          title="Detections"
-          right={
-            <span className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">
-              {allDetections.length === 0
-                ? 'IDLE'
-                : `${detections.length} KNOWN · ${unknownDetections.length} UNKNOWN`}
-            </span>
-          }
-        >
-          {allDetections.length === 0 ? (
-            <Empty
-              label={
-                cameraRunning
-                  ? 'No objects detected — waiting for recognition.'
-                  : 'Camera offline. Nothing to interpret.'
-              }
-            />
-          ) : (
-            <ul className="mt-1 space-y-1.5">
-              {allDetections.map((d, i) => {
-                const isUnknown = d.class_name === UNKNOWN_CLASS
-                const isUnattended = isUnknown && unattendedIds.has(d.instance_id ?? '')
-                return (
-                  <li
-                    key={`${d.instance_id ?? d.timestamp}-${i}`}
-                    className={`flex items-center justify-between border px-2.5 py-1.5 ${
-                      isUnattended
-                        ? 'border-error/50 bg-error/10'
-                        : 'border-outline-variant/30 bg-surface-container-low'
-                    }`}
+                  {/* Real telemetry only — every field is a live backend value. */}
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 px-2 pb-1 font-mono text-[10px] uppercase tracking-wider text-slate-300">
+                    <span className="flex gap-3">
+                      <span style={{ color: status?.enabled ? '#4ade80' : '#f97316' }}>
+                        INF {status?.enabled ? 'ONLINE' : 'OFFLINE'}
+                      </span>
+                      <span>FPS {status ? status.actualFps.toFixed(1) : '—'}</span>
+                      <span>LAT {result?.inferenceMs != null ? `${result.inferenceMs}ms` : '—'}</span>
+                      <span>TRK {attendance.status?.objects ?? 0}</span>
+                    </span>
+                    <span>
+                      {frameW && frameH ? `${frameW}×${frameH}` : '—'} · {status?.detector ?? '—'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Transport controls, docked directly under the frame and
+                    sharing its width. */}
+                <div className="grid shrink-0 grid-cols-2 gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={onCameraStart}
+                    disabled={cameraRunning || cameraOffline}
+                    className="btn-primary"
                   >
-                    <span className="flex items-center gap-2 font-mono text-[11px] font-bold uppercase tracking-wider">
-                      <span
-                        className="h-2 w-2"
-                        style={{
-                          background: isUnattended
-                            ? BOX_COLORS.unattended
-                            : isUnknown
-                              ? BOX_COLORS.unknown
-                              : CLASS_COLOR[d.class_name] ?? '#4cd7f6',
-                        }}
-                      />
-                      {isUnattended
-                        ? 'unattended object'
-                        : isUnknown
-                          ? `unknown (${d.instance_id ?? '?'})`
-                          : d.class_name.replace(/_/g, ' ')}
-                    </span>
-                    <span className="font-mono text-[11px] text-secondary">
-                      {Math.round(d.confidence * 100)}%
-                    </span>
-                  </li>
-                )
-              })}
-            </ul>
+                    <span className="msym text-base leading-none">videocam</span>
+                    CAM ON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onCameraStop}
+                    disabled={!cameraRunning}
+                    className="btn-outline"
+                  >
+                    <span className="msym text-base leading-none">videocam_off</span>
+                    CAM OFF
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex min-h-[12rem] flex-1 items-center justify-center bg-black">
+              <EmptyState
+                icon="videocam_off"
+                title={cameraOffline ? 'Camera offline' : 'Camera stopped'}
+                description={
+                  cameraOffline
+                    ? 'The backend is not reachable, so no camera control is available.'
+                    : 'Press CAM ON to start visual monitoring. Nothing is inferred without a live frame.'
+                }
+                status={camera ? `${camera.width}×${camera.height} · ${camera.fps}fps configured` : undefined}
+                lastUpdated={camera ? 'no frames are being served' : undefined}
+              />
+            </div>
           )}
         </Panel>
       </div>
 
-      <div className="space-y-4">
-        <Panel title="Detection Engine">
-          <div className="mt-1 grid grid-cols-2 gap-2">
-            <StatTile label="Detector" value={detectionStatus?.detector ?? '—'} />
-            <StatTile label="Enabled" value={detectionStatus?.enabled ? 'ON' : 'OFF'} />
-            <StatTile label="Inference" value={detectionResult?.inferenceStatus ?? '—'} />
-            <StatTile
-              label="Latency"
-              value={detectionResult?.inferenceMs != null ? `${detectionResult.inferenceMs}ms` : '—'}
-            />
-            <StatTile label="Objects" value={String(detections.length)} />
-            <StatTile
-              label="Unknown"
-              value={String(unknownDetections.length)}
-              color={unknownDetections.length > 0 ? BOX_COLORS.unknown : undefined}
-            />
-            <StatTile
-              label="Frame"
-              value={
-                detectionResult?.frameWidth && detectionResult?.frameHeight
-                  ? `${detectionResult.frameWidth}x${detectionResult.frameHeight}`
-                  : '—'
-              }
-            />
-            <StatTile
-              label="Raw/Stable"
-              value={
-                detectionStatus?.rawDetectionCount != null
-                  ? `${detectionStatus.rawDetectionCount}/${detections.length}`
-                  : '—'
-              }
-            />
-            <StatTile
-              label="AI Rate"
-              value={
-                detectionStatus?.actualFps != null
-                  ? `${detectionStatus.actualFps.toFixed(1)}/${detectionStatus.targetFps ?? '—'} fps`
-                  : '—'
-              }
-            />
-            <StatTile
-              label="Frames Dropped"
-              value={detectionStatus?.skippedForRate != null ? String(detectionStatus.skippedForRate) : '—'}
-            />
-            <StatTile
-              label="Trace"
-              value={detectionStatus?.traceEnabled ? `ON (${detectionStatus.traceLevel ?? detectionStatus.trace?.level ?? 'on'})` : 'OFF'}
-            />
-            <StatTile
-              label="Last"
-              value={detectionStatus?.lastInference ? new Date(detectionStatus.lastInference).toLocaleTimeString() : '—'}
-            />
-          </div>
-          {detectionStatus?.error && (
-            <p className="mt-2 border border-error/40 bg-error/10 px-2 py-1 font-mono text-[11px] text-error">
-              AI ENGINE ERROR: {detectionStatus.error}
-            </p>
-          )}
+      {/* ── 2. Intelligence about the frame ──────────────────────────── */}
+      <div
+        className="grid min-h-0 grid-cols-1 gap-[var(--grid-gap)] lg:grid-cols-3"
+        style={{ flex: INTEL_ROW }}
+      >
+        <Panel title="Current Activity" fill scroll>
+          <KeyValue label="Detected activity" value={activityLabel ?? '—'} color={activityLabel ? '#4cd7f6' : undefined} />
+          <KeyValue
+            label="Confidence"
+            value={activityConfidence != null ? `${Math.round(activityConfidence * 100)}%` : '—'}
+          />
+          <KeyValue label="Activity state" value={state.status} color={tone} />
+          <KeyValue
+            label="Last result"
+            value={state.lastClassification?.result ?? '—'}
+            color={state.lastClassification ? severityColor(state.lastClassification.severity) : undefined}
+          />
+          <KeyValue
+            label="Detection time"
+            value={activityTs ? `${new Date(activityTs).toLocaleTimeString()} (${relativeAge(activityTs)})` : '—'}
+          />
         </Panel>
 
-        {detectionStatus?.traceEnabled && detectionStatus.trace && (
-          <Panel title="Trace">
-            <div className="mb-2 grid grid-cols-3 gap-2">
-              <StatTile label="Level" value={detectionStatus.traceLevel ?? detectionStatus.trace.level} />
-              <StatTile label="Events" value={String(detectionStatus.trace.eventsTotal)} />
-              <StatTile
-                label="Rate"
-                value={`${detectionStatus.trace.eventsPerSecond.toFixed(1)}/s`}
-              />
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <StatTile label="capture" value={fmtMs(detectionStatus.trace.captureMs)} />
-              <StatTile label="yolo" value={fmtMs(detectionStatus.trace.yoloMs)} />
-              <StatTile label="unknown" value={fmtMs(detectionStatus.trace.unknownDetectorMs)} />
-              <StatTile label="tracker" value={fmtMs(detectionStatus.trace.trackerMs)} />
-              <StatTile label="openclip" value={fmtMs(detectionStatus.trace.openclipMs)} />
-              <StatTile label="hazard" value={fmtMs(detectionStatus.trace.hazardMs)} />
-            </div>
-            <p className="mt-2 font-mono text-[11px] text-on-surface-variant">
-              total {fmtMs(detectionStatus.trace.lastPipelineMs)} · buffer{' '}
-              {detectionStatus.trace.bufferSize}/{detectionStatus.trace.bufferCapacity} · history at
-              /api/detection/trace
-            </p>
-            {detectionStatus.trace.errors > 0 && (
-              <p className="mt-2 border border-error/40 bg-error/10 px-2 py-1 font-mono text-[11px] text-error">
-                TRACER ERROR: {detectionStatus.trace.errors} failure(s) — diagnostics are incomplete
-              </p>
-            )}
-          </Panel>
-        )}
-
-        <Panel title="Model">
-          <p className="mt-1 font-mono text-[11px] uppercase tracking-wider text-on-surface-variant">
-            Weights
-          </p>
-          <p className="mb-2 break-all font-mono text-xs text-on-surface">
-            {detectionStatus?.modelPath ?? 'no model loaded'}
-          </p>
-          {detectionStatus?.generalPurpose === false && (
-            <p className="mb-2 border border-warning/50 bg-warning/10 px-2 py-1 font-mono text-[11px] text-warning">
-              SPECIALISED MODEL — {detectionStatus.classCount} classes only. It CANNOT
-              detect person/bottle/cup/laptop. Set DETECTION_BACKEND=yolo for the
-              general model.
+        <Panel title="Human–Object Interaction" fill scroll>
+          <KeyValue label="Tracked objects" value={String(attendance.status?.objects ?? 0)} />
+          <KeyValue
+            label="Near astronaut"
+            value={String(nearAstronaut.length)}
+            color={nearAstronaut.length > 0 ? '#4cd7f6' : undefined}
+          />
+          <KeyValue
+            label="Currently held"
+            value={held ? held.className.replace(/_/g, ' ') : 'none'}
+            color={held ? '#4ade80' : undefined}
+          />
+          <KeyValue
+            label="Interaction state"
+            value={interactionState}
+            color={
+              interactionState === 'HELD'
+                ? '#4ade80'
+                : interactionState === 'UNATTENDED'
+                  ? '#ef4444'
+                  : undefined
+            }
+          />
+          <KeyValue
+            label="Unattended"
+            value={String(attendance.status?.unattendedCount ?? 0)}
+            color={(attendance.status?.unattendedCount ?? 0) > 0 ? '#ef4444' : undefined}
+          />
+          <KeyValue label="In container" value={String(attendance.status?.inContainerCount ?? 0)} />
+          {attendance.status && (
+            <p className="mt-1.5 font-mono text-[10px] leading-snug text-on-surface-variant">
+              proximity ≤ {attendance.status.thresholds.proximity} · containment ≥{' '}
+              {attendance.status.thresholds.containment} · arm reach{' '}
+              {attendance.status.thresholds.armReach} · held {attendance.status.thresholds.heldFrames}{' '}
+              frames · tracked {attendance.status.thresholds.trackedClasses.length} classes ·{' '}
+              {attendance.status.monitoring ? 'monitoring on' : 'monitoring off'}
             </p>
           )}
-          <div className="mb-2 grid grid-cols-3 gap-2">
-            <StatTile label="Classes" value={String(detectionStatus?.classCount ?? '—')} />
-            <StatTile
-              label="Size"
-              value={detectionStatus?.modelSizeMb != null ? `${detectionStatus.modelSizeMb}MB` : '—'}
-            />
-            <StatTile label="imgsz" value={String(detectionStatus?.inputSize ?? '—')} />
-            <StatTile label="conf" value={String(detectionStatus?.confThreshold ?? '—')} />
-            <StatTile label="iou" value={String(detectionStatus?.iouThreshold ?? '—')} />
-            <StatTile
-              label="Role"
-              value={
-                detectionStatus?.generalPurpose === false
-                  ? 'SPECIAL'
-                  : detectionStatus?.generalPurpose
-                    ? 'GENERAL'
-                    : '—'
-              }
-            />
-          </div>
-          {detectionStatus?.classes ? (
-            <ul className="flex flex-wrap gap-1">
-              {detectionStatus.classes.map(c => (
-                <li
-                  key={c}
-                  className="border border-outline-variant/40 bg-surface-container-low px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-on-surface-variant"
-                >
-                  {c.replace(/_/g, ' ')}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <Empty label="No class vocabulary (generic model)." />
-          )}
-        </Panel>
-
-        <Panel
-          title="Object Containment & Attendance"
-          right={
-            <span className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">
-              {attendance.status?.objects != null
-                ? `${attendance.status.objects} TRACKED · ${attendance.status.unattendedCount ?? 0} UNATTENDED`
-                : 'IDLE'}
-            </span>
-          }
-        >
-          <div className="grid grid-cols-3 gap-2">
-            <StatTile
-              label="In Container"
-              value={String(attendance.status?.inContainerCount ?? 0)}
-            />
-            <StatTile
-              label="Unattended"
-              value={String(attendance.status?.unattendedCount ?? 0)}
-            />
-            <StatTile
-              label="Timeout"
-              value={
-                attendance.status?.thresholds?.unattendedTimeoutMs != null
-                  ? `${(attendance.status.thresholds.unattendedTimeoutMs / 1000).toFixed(1)}s`
-                  : '—'
-              }
-            />
-          </div>
-
-          {!cameraRunning ? (
-            <Empty label="Camera offline — containment needs the live feed." />
-          ) : (attendance.result?.watches ?? []).length === 0 ? (
-            <Empty label="Tracking objects. Show an object near a container." />
-          ) : (
-            <ul className="mt-3 space-y-1.5">
-              {(attendance.result?.watches ?? []).map(w => (
-                <li
-                  key={w.instanceId}
-                  className={`border px-2.5 py-1.5 ${watchTone(w.state)}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-[11px] font-bold uppercase tracking-wider">
+          {watches.length > 0 ? (
+            <ul className="rows mt-1.5">
+              {watches.map(w => (
+                <li key={w.instanceId} className={`border px-2 py-1 ${watchTone(w.state)}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="min-w-0 truncate font-mono text-[11px] font-bold uppercase tracking-wider">
                       {w.className.replace(/_/g, ' ')}
                     </span>
-                    <span className="font-mono text-[10px] uppercase tracking-wider">
+                    <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider">
                       {w.state.replace(/_/g, ' ')}
                     </span>
                   </div>
                   <div className="mt-0.5 flex flex-wrap gap-x-3 font-mono text-[10px] opacity-80">
-                    {w.insideContainer ? (
+                    <span>id {w.instanceId}</span>
+                    {w.insideContainer && (
                       <span>
-                        IN {w.containerClass?.replace(/_/g, ' ') ?? '?'} ·{' '}
+                        in {w.containerClass?.replace(/_/g, ' ') ?? '?'} ·{' '}
                         {(w.containmentScore * 100).toFixed(0)}%
                       </span>
-                    ) : null}
-                    {!w.isUnknown && w.personFreeMs > 0 ? (
-                      <span>NO CREW {Math.round(w.personFreeMs)}ms</span>
-                    ) : null}
-                    {w.isUnknown ? <span>UNKNOWN CLASS</span> : null}
+                    )}
+                    {w.personId && <span>held by {w.personId}</span>}
+                    {w.isUnknown && <span>unknown class</span>}
                   </div>
                 </li>
               ))}
             </ul>
+          ) : (
+            <p className="mt-1.5 font-mono text-[10px] text-on-surface-variant">
+              {streamRunning ? 'Tracking objects. Show an object near the astronaut.' : 'Camera offline — no interaction data.'}
+            </p>
           )}
+        </Panel>
 
-          {(attendance.result?.events ?? []).length > 0 && (
-            <div className="mt-3">
-              <p className="mb-1 font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">
-                Recent events
+        <Panel title="Procedure Intelligence" fill scroll>
+          <KeyValue
+            label="Current step"
+            value={
+              expected
+                ? `${state.currentStepIndex + 1}/${state.experiment.steps.length} · ${expected.label}`
+                : 'Procedure complete'
+            }
+          />
+          <KeyValue
+            label="Expected action"
+            value={expected ? `${ACTION_LABEL[expected.action ?? ''] ?? expected.action} ${expected.object ?? ''}`.trim() : '—'}
+            color="#4cd7f6"
+          />
+          <KeyValue
+            label="Observed action"
+            value={activityLabel ?? '—'}
+            color={
+              state.lastClassification?.result === 'CORRECT'
+                ? '#4ade80'
+                : state.lastClassification?.result
+                  ? '#f97316'
+                  : undefined
+            }
+          />
+          <KeyValue label="Procedure status" value={state.status} color={tone} />
+          <KeyValue
+            label="Confidence"
+            value={activityConfidence != null ? `${Math.round(activityConfidence * 100)}%` : '—'}
+          />
+          <div className="mt-1.5 grid grid-cols-4 gap-[var(--row-pad)]">
+            <StatTile label="OOS" value={String(state.errors.outOfSequence)} color={state.errors.outOfSequence > 0 ? '#f97316' : undefined} />
+            <StatTile label="SKIP" value={String(state.errors.skipped)} color={state.errors.skipped > 0 ? '#f97316' : undefined} />
+            <StatTile label="REP" value={String(state.errors.repeated)} color={state.errors.repeated > 0 ? '#f97316' : undefined} />
+            <StatTile label="UNK" value={String(state.errors.unknown)} color={state.errors.unknown > 0 ? '#ef4444' : undefined} />
+          </div>
+          {engine && (
+            <p className="mt-1.5 font-mono text-[10px] text-on-surface-variant">
+              engine {engine.status} · {engine.completed_count}/{engine.total_steps} complete ·{' '}
+              {engine.violation_count} violation{engine.violation_count === 1 ? '' : 's'}
+            </p>
+          )}
+          <ol className="rows mt-1.5">
+            {state.experiment.steps.map((step, i) => {
+              const done = state.completedStepIds.includes(step.id)
+              const current = state.status === 'RUNNING' && expected?.id === step.id
+              return (
+                <li
+                  key={step.id}
+                  className="flex items-center gap-2 border px-2 py-1"
+                  style={{
+                    borderColor: done
+                      ? 'color-mix(in oklab, #22c55e 45%, transparent)'
+                      : current
+                        ? 'color-mix(in oklab, var(--color-primary) 60%, transparent)'
+                        : 'color-mix(in oklab, var(--t-outline-variant) 30%, transparent)',
+                  }}
+                >
+                  <span className="shrink-0 font-mono text-[10px] font-bold">{done ? '✓' : i + 1}</span>
+                  <span className="min-w-0 flex-1 truncate font-mono text-[10px]">{step.label}</span>
+                  <span className="shrink-0 font-mono text-[9px] uppercase tracking-wider text-on-surface-variant">
+                    {ACTION_LABEL[step.action ?? ''] ?? step.action}
+                  </span>
+                </li>
+              )
+            })}
+          </ol>
+        </Panel>
+      </div>
+
+      {/* ── 3. Compact AI monitoring strip ───────────────────────────── */}
+      <div
+        className="grid min-h-0 grid-cols-1 gap-[var(--grid-gap)] md:grid-cols-2 xl:grid-cols-4"
+        style={{ flex: MONITOR_ROW }}
+      >
+        <Panel
+          title="Activity Timeline"
+          fill
+          scroll
+          right={
+            <span className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">
+              {activityTimeline.length}
+            </span>
+          }
+        >
+          {activityTimeline.length === 0 ? (
+            <EmptyState compact icon="history" title="No activity events" />
+          ) : (
+            <Timeline entries={activityTimeline} />
+          )}
+        </Panel>
+
+        <Panel
+          title="Object Tracking"
+          fill
+          scroll
+          right={
+            <span className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">
+              {allDetections.length} in frame
+            </span>
+          }
+        >
+          {allDetections.length === 0 ? (
+            <EmptyState
+              compact
+              icon="search_off"
+              title={streamRunning ? 'No objects in frame' : 'Camera offline'}
+              description={
+                streamRunning
+                  ? 'The detector is running but has not recognised anything in the current frame.'
+                  : 'Nothing to interpret without the live feed.'
+              }
+            />
+          ) : (
+            <ul className="rows">
+              {allDetections.map((d, i) => (
+                <DetectionRow
+                  key={`${d.instance_id ?? d.timestamp}-${i}`}
+                  detection={d}
+                  unattended={unattendedIds.has(d.instance_id ?? '')}
+                />
+              ))}
+            </ul>
+          )}
+        </Panel>
+
+        <Panel title="AI Inference Status" fill scroll>
+          {status ? (
+            <>
+              <div className="tile-grid grid-cols-2">
+                <StatTile label="Detector" value={status.detector ?? '—'} />
+                <StatTile
+                  label="Inference"
+                  value={result?.inferenceStatus ?? (status.enabled ? 'ONLINE' : 'OFFLINE')}
+                  color={status.enabled ? '#4ade80' : '#f97316'}
+                />
+                <StatTile
+                  label="Latency"
+                  value={result?.inferenceMs != null ? `${result.inferenceMs}ms` : '—'}
+                />
+                <StatTile label="FPS" value={status.actualFps.toFixed(1)} />
+                <StatTile
+                  label="Frame"
+                  value={result?.frameWidth ? `${result.frameWidth}x${result.frameHeight}` : '—'}
+                />
+                <StatTile label="Dropped" value={String(status.skippedForRate)} />
+                <StatTile
+                  label="Raw/Stable"
+                  value={`${status.rawDetectionCount}/${status.detectionCount}`}
+                  title="Current-frame detections / temporally stabilised detections"
+                />
+                <StatTile
+                  label="AI rate"
+                  value={`${status.actualFps.toFixed(1)}/${status.targetFps || '∞'}`}
+                  title="Measured AI inferences per second / configured cap"
+                />
+                <StatTile
+                  label="Last infer"
+                  value={status.lastInference ? relativeAge(status.lastInference) : '—'}
+                />
+                <StatTile
+                  label="Trace"
+                  value={status.traceEnabled ? (status.traceLevel ?? status.trace?.level ?? 'on') : 'OFF'}
+                />
+              </div>
+              {status.error && (
+                <p className="mt-1.5 border border-error/40 bg-error/10 px-2 py-1 font-mono text-[10px] text-error">
+                  AI ENGINE ERROR: {status.error}
+                </p>
+              )}
+              <p className="mt-1.5 break-all font-mono text-[10px] text-on-surface-variant">
+                {status.modelPath ?? 'no model loaded'}
               </p>
-              <ul className="space-y-1">
-                {(attendance.result?.events ?? [])
-                  .slice(-6)
-                  .reverse()
-                  .map(e => (
-                    <li key={`${e.kind}-${e.ts}`} className="font-mono text-[10px] leading-snug">
-                      <span className="text-on-surface-variant">
-                        {new Date(e.ts).toLocaleTimeString()}
-                      </span>{' '}
-                      <span
-                        className={
-                          e.severity === 'warn'
-                            ? 'text-warning'
-                            : e.severity === 'error'
-                              ? 'text-error'
-                              : 'text-on-surface'
-                        }
-                      >
-                        {e.kind.replace(/_/g, ' ')}
-                      </span>
-                      {e.object ? <span className="opacity-70"> · {e.object}</span> : null}
-                      {e.reason ? <span className="opacity-60"> — {e.reason}</span> : null}
+              {status.generalPurpose === false && (
+                <p className="mt-1.5 border border-warning/50 bg-warning/10 px-2 py-1 font-mono text-[10px] text-warning">
+                  SPECIALISED MODEL — {status.classCount} classes only. It CANNOT detect
+                  person/bottle/cup/laptop. Set DETECTION_BACKEND=yolo for the general model.
+                </p>
+              )}
+              <div className="tile-grid mt-1.5 grid-cols-3">
+                <StatTile label="Classes" value={String(status.classCount ?? '—')} />
+                <StatTile label="Size" value={status.modelSizeMb != null ? `${status.modelSizeMb}MB` : '—'} />
+                <StatTile label="imgsz" value={String(status.inputSize ?? '—')} />
+                <StatTile label="conf" value={String(status.confThreshold ?? '—')} />
+                <StatTile label="iou" value={String(status.iouThreshold ?? '—')} />
+                <StatTile
+                  label="Role"
+                  value={
+                    status.generalPurpose === false ? 'SPECIAL' : status.generalPurpose ? 'GENERAL' : '—'
+                  }
+                />
+              </div>
+              {status.classes ? (
+                <ul className="mt-1.5 flex flex-wrap gap-1">
+                  {status.classes.map(c => (
+                    <li
+                      key={c}
+                      className="border border-outline-variant/40 bg-surface-container-low px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-on-surface-variant"
+                    >
+                      {c.replace(/_/g, ' ')}
                     </li>
                   ))}
-              </ul>
-            </div>
+                </ul>
+              ) : (
+                <p className="mt-1.5 font-mono text-[10px] text-on-surface-variant">
+                  No class vocabulary (generic model).
+                </p>
+              )}
+              {status.traceEnabled && status.trace && (
+                <>
+                  <div className="tile-grid mt-1.5 grid-cols-3">
+                    <StatTile label="Level" value={status.traceLevel ?? status.trace.level} />
+                    <StatTile label="Events" value={String(status.trace.eventsTotal)} />
+                    <StatTile label="Rate" value={`${status.trace.eventsPerSecond.toFixed(1)}/s`} />
+                    <StatTile label="capture" value={fmtMs(status.trace.captureMs)} />
+                    <StatTile label="yolo" value={fmtMs(status.trace.yoloMs)} />
+                    <StatTile label="unknown" value={fmtMs(status.trace.unknownDetectorMs)} />
+                    <StatTile label="tracker" value={fmtMs(status.trace.trackerMs)} />
+                    <StatTile label="openclip" value={fmtMs(status.trace.openclipMs)} />
+                    <StatTile label="hazard" value={fmtMs(status.trace.hazardMs)} />
+                  </div>
+                  {status.trace.errors > 0 && (
+                    <p className="mt-1.5 border border-error/40 bg-error/10 px-2 py-1 font-mono text-[10px] text-error">
+                      TRACER ERROR: {status.trace.errors} failure(s) — diagnostics are incomplete
+                    </p>
+                  )}
+                </>
+              )}
+            </>
+          ) : (
+            <EmptyState
+              compact
+              icon="memory"
+              title="Detection engine offline"
+              description="No status payload from /api/detection/status."
+            />
+          )}
+        </Panel>
+
+        <Panel
+          title="System Events"
+          fill
+          scroll
+          right={
+            <span
+              className="font-mono text-[10px] font-bold uppercase tracking-wider"
+              style={{ color: activeAlerts.length > 0 ? '#ef4444' : tone }}
+            >
+              {activeAlerts.length} alert{activeAlerts.length === 1 ? '' : 's'}
+            </span>
+          }
+        >
+          <div className="tile-grid mb-[var(--row-pad)] grid-cols-2">
+            <StatTile label="Mission" value={snapshot?.mission_state ?? (safety.offline ? 'offline' : '—')} color={tone} />
+            <StatTile
+              label="Risk"
+              value={snapshot?.overall_risk_level ?? '—'}
+              color={snapshot ? tone : undefined}
+            />
+            <StatTile
+              label="Risk score"
+              value={snapshot ? `${Math.round(snapshot.overall_risk_score * 100)}%` : '—'}
+            />
+            <StatTile
+              label="Top hazard"
+              value={snapshot?.top_hazard?.object ?? 'none'}
+              color={snapshot?.top_hazard ? BOX_COLORS.hazard : undefined}
+            />
+            <StatTile
+              label="Feed"
+              value={snapshot?.feed_stale ? 'stale' : streamRunning ? 'fresh' : '—'}
+              color={snapshot?.feed_stale ? '#f97316' : streamRunning ? '#4ade80' : undefined}
+            />
+            <StatTile label="Monitoring" value={snapshot?.monitoring ? 'ON' : 'OFF'} />
+          </div>
+          {activeAlerts.length > 0 && (
+            <ul className="rows">
+              {activeAlerts.slice(0, 3).map(a => (
+                <li
+                  key={a.id}
+                  className="truncate font-mono text-[10px] font-bold uppercase tracking-wider"
+                  style={{ color: BOX_COLORS.hazard }}
+                >
+                  {a.level} — {a.title}
+                </li>
+              ))}
+            </ul>
+          )}
+          {systemTimeline.length === 0 ? (
+            <EmptyState compact icon="history" title="No system events yet" />
+          ) : (
+            <Timeline entries={systemTimeline} />
           )}
         </Panel>
       </div>
-    </div>
+    </PageShell>
+  )
+}
+
+/** One detection: class, confidence and the backend tracking id. */
+function DetectionRow({ detection: d, unattended }: { detection: Detection; unattended: boolean }) {
+  const isUnknown = d.class_name === UNKNOWN_CLASS
+  return (
+    <li
+      className="border px-2 py-1"
+      style={{
+        borderLeftWidth: 3,
+        borderLeftColor: unattended
+          ? BOX_COLORS.unattended
+          : isUnknown
+            ? BOX_COLORS.unknown
+            : (CLASS_COLOR[d.class_name] ?? '#4cd7f6'),
+      }}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate font-mono text-[11px] font-bold uppercase tracking-wider">
+          {unattended ? 'unattended object' : isUnknown ? '? unknown object' : d.class_name.replace(/_/g, ' ')}
+        </span>
+        <span className="shrink-0 font-mono text-[11px] text-secondary">
+          {Math.round(d.confidence * 100)}%
+        </span>
+      </div>
+      <div className="mt-0.5 flex flex-wrap gap-x-3 font-mono text-[10px] text-on-surface-variant">
+        <span>id: {d.instance_id ?? '—'}</span>
+        {unattended && <span className="text-error">UNATTENDED</span>}
+        {isUnknown && <span>unknown class</span>}
+      </div>
+    </li>
   )
 }

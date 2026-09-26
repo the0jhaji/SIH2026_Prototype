@@ -16,8 +16,16 @@ import { StationView } from './StationView'
 import { EscalationView } from './EscalationView'
 import { IncidentsView } from './IncidentsView'
 import { ExperimentsView } from './ExperimentsView'
-import type { ViewKey } from './nav'
+import { VIEW_DENSITY, type ViewKey } from './nav'
 
+/**
+ * The application shell owns the viewport.
+ *
+ * The nav and top bar are grid areas of a `100dvh` grid rather than
+ * `position: fixed` overlays, and the page area is the only scrolling
+ * region. Previously the body scrolled under fixed chrome, so every view
+ * was a short strip at the top of an otherwise empty window.
+ */
 export default function AppShell() {
   const [view, setView] = useState<ViewKey>('mission')
   const { state, mode, connected, busy, start, stop, setMode, safetyMessage, clearSafetyMessage } =
@@ -43,6 +51,8 @@ export default function AppShell() {
 
   const common = {
     state,
+    engine: engine.snapshot,
+    engineOffline: engine.offline,
     mode,
     camera: camera.info,
     cameraRunning,
@@ -55,11 +65,10 @@ export default function AppShell() {
   }
 
   return (
-    <div className="min-h-screen bg-bg text-on-surface">
+    <div className="app-shell" data-density={VIEW_DENSITY[view]}>
       <Sidebar active={view} onNavigate={setView} />
       <Header
         view={view}
-        status={state.status}
         running={state.status === 'RUNNING'}
         recording={state.recording}
         mode={mode}
@@ -76,44 +85,27 @@ export default function AppShell() {
         onModeChange={setMode}
       />
 
-      <main className="pl-24 pt-14">
-        <div className="p-4">
-          {view === 'mission' && <MissionView {...common} />}
-          {view === 'camera' && (
-            <CameraView
-              {...common}
-              detectionResult={detection.result}
-              detectionStatus={detection.status}
-            />
-          )}
-          {view === 'assessment' && <AssessmentView {...common} />}
-          {view === 'astronaut' && <AstronautView {...common} />}
-          {view === 'alerts' && <AlertsView {...common} />}
-          {view === 'station' && <StationView {...common} />}
-          {view === 'escalation' && <EscalationView {...common} />}
-          {view === 'incidents' && <IncidentsView {...common} />}
-          {view === 'experiments' && (
-            <ExperimentsView
-              state={state}
-              mode={mode}
-              camera={camera.info}
-              cameraRunning={cameraRunning}
-              cameraSending={camera.sending}
-              cameraOffline={cameraOffline}
-              onCameraStart={camera.start}
-              onCameraStop={camera.stop}
-              detection={detection.result}
-              connected={connected}
-              busy={busy}
-              onStart={start}
-              onStop={stop}
-              engineSnapshot={engine.snapshot}
-              engineOffline={engine.offline}
-              onEngineStart={engine.start}
-              onEngineStop={engine.stop}
-            />
-          )}
-        </div>
+      <main className="app-main">
+        {view === 'mission' && <MissionView {...common} />}
+        {view === 'camera' && <CameraView {...common} />}
+        {view === 'assessment' && <AssessmentView {...common} />}
+        {view === 'astronaut' && <AstronautView {...common} />}
+        {view === 'alerts' && <AlertsView {...common} />}
+        {view === 'station' && <StationView {...common} />}
+        {view === 'escalation' && <EscalationView {...common} />}
+        {view === 'incidents' && <IncidentsView {...common} />}
+        {view === 'experiments' && (
+          <ExperimentsView
+            {...common}
+            cameraSending={camera.sending}
+            connected={connected}
+            busy={busy}
+            onStart={start}
+            onStop={stop}
+            onEngineStart={engine.start}
+            onEngineStop={engine.stop}
+          />
+        )}
       </main>
     </div>
   )

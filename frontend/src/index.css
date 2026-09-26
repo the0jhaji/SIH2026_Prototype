@@ -29,6 +29,12 @@
   --color-error: var(--t-error);
   --color-error-container: var(--t-error-container);
 
+  /* Named operational severities. Without these `text-warning` /
+     `bg-warning/10` resolved to nothing and the affected chips rendered
+     unstyled instead of visibly warning. */
+  --color-warning: var(--t-warning);
+  --color-amber: var(--t-warning);
+
   --color-surface: var(--t-surface);
   --color-on-surface: var(--t-on-surface);
   --color-on-surface-variant: var(--t-on-surface-variant);
@@ -58,6 +64,7 @@
   --t-tertiary: #8c4a44;
   --t-error: #ba1a1a;
   --t-error-container: #ffdad6;
+  --t-warning: #8a5200;
 
   --t-surface: #fdfcff;
   --t-on-surface: #1b1b1d;
@@ -88,6 +95,7 @@
   --t-tertiary: #ffb3ad;
   --t-error: #ffb4ab;
   --t-error-container: #93000a;
+  --t-warning: #ffb95f;
 
   --t-surface: #131314;
   --t-on-surface: #e5e2e3;
@@ -113,23 +121,234 @@
     margin: 0;
     -webkit-font-smoothing: antialiased;
   }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
   select {
     background-image: none;
   }
+  /* Scrollbars are part of a dense operator UI, not a nuisance to hide:
+     an invisible one would hide the fact that a panel has more data. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--t-outline-variant) transparent;
+  }
+}
+
+/* ── Shell geometry ─────────────────────────────────────────────────
+   One place defines every height the UI needs. Density is a data
+   attribute on the shell, so a view changes its whole rhythm without
+   re-styling a single card. */
+:root {
+  --nav-w: 5rem;
+  --header-h: 3rem;
+  --page-pad: 0.75rem;
+  --grid-gap: 0.625rem;
+  --card-pad: 0.75rem;
+  --card-head-h: 2rem;
+  --row-pad: 0.375rem;
+  --strip-h: 10rem;
+}
+
+[data-density="compact"] {
+  --page-pad: 0.5rem;
+  --grid-gap: 0.5rem;
+  --card-pad: 0.5rem;
+  --card-head-h: 1.75rem;
+  --row-pad: 0.25rem;
+  --strip-h: 9rem;
+}
+
+[data-density="focus"] {
+  --page-pad: 0.875rem;
+  --grid-gap: 0.75rem;
+  --card-pad: 0.875rem;
+  --card-head-h: 2.125rem;
+  --row-pad: 0.5rem;
+  --strip-h: 11rem;
 }
 
 @layer components {
-  /* Card surface used by every panel in the dashboard. Sharp corners. */
+  /* ── Application shell ───────────────────────────────────────────
+     Grid areas, not fixed positioning: the nav and top bar are sized by
+     the same variables the page area measures itself against, so a page
+     can no longer drift under a fixed header or leave a dead strip at
+     the bottom. `100vh` first as a fallback for engines without dvh. */
+  .app-shell {
+    display: grid;
+    grid-template-columns: var(--nav-w) minmax(0, 1fr);
+    grid-template-rows: var(--header-h) minmax(0, 1fr);
+    grid-template-areas:
+      "nav head"
+      "nav main";
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+  .app-nav {
+    grid-area: nav;
+    min-height: 0;
+  }
+  .app-head {
+    grid-area: head;
+    min-width: 0;
+  }
+  .app-main {
+    grid-area: main;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* ── Page body ────────────────────────────────────────────────────
+     The single scrolling region of a view. `height: 100%` (not
+     `min-height`) is what makes the fill rows below able to claim the
+     leftover viewport instead of letting the page grow past it. */
+  .page-scroll {
+    display: flex;
+    flex-direction: column;
+    gap: var(--grid-gap);
+    height: 100%;
+    min-height: 0;
+    padding: var(--page-pad);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* A row that claims the remaining viewport height. Its children are
+     grid items that must be allowed to shrink, otherwise their content
+     pushes the page into a second scrollbar. */
+  .page-fill {
+    display: grid;
+    gap: var(--grid-gap);
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .page-fill > * {
+    min-height: 0;
+    min-width: 0;
+  }
+
+  /* ── 12-column responsive grid ────────────────────────────────────
+     Cards declare a span; nothing hardcodes a pixel column. Below the
+     breakpoint the grid is one column and every cell is forced full
+     width by the higher-specificity `.dash-grid > .dash-cell` rule, so
+     spans never need per-breakpoint remapping. */
+  .dash-grid {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: var(--grid-gap);
+  }
+  .dash-cell {
+    min-width: 0;
+  }
+  .span-1 { grid-column: span 1; }
+  .span-2 { grid-column: span 2; }
+  .span-3 { grid-column: span 3; }
+  .span-4 { grid-column: span 4; }
+  .span-5 { grid-column: span 5; }
+  .span-6 { grid-column: span 6; }
+  .span-7 { grid-column: span 7; }
+  .span-8 { grid-column: span 8; }
+  .span-9 { grid-column: span 9; }
+  .span-10 { grid-column: span 10; }
+  .span-11 { grid-column: span 11; }
+  .span-12 { grid-column: span 12; }
+  .span-full { grid-column: 1 / -1; }
+
+  @media (max-width: 900px) {
+    .dash-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .dash-grid > .dash-cell {
+      grid-column: 1 / -1;
+    }
+  }
+
+  /* ── Cards ────────────────────────────────────────────────────────
+     A panel is a flex column so a `fill` panel can hand its leftover
+     height to a scrolling body. That is what removes the "tall card with
+     20px of content" shape. */
   .panel {
     @apply border border-outline-variant/50 bg-surface-container text-on-surface;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
   }
+  .panel-fill {
+    min-height: 0;
+    height: 100%;
+    /* Content never grows the panel past its row: a filling body scrolls
+       internally, so the page keeps exactly one scrollbar. */
+    overflow: hidden;
+  }
+  .panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex: none;
+    height: var(--card-head-h);
+    padding-inline: var(--card-pad);
+    border-bottom: 1px solid color-mix(in oklab, var(--t-outline-variant) 40%, transparent);
+  }
+  .panel-body {
+    padding: var(--card-pad);
+    min-width: 0;
+  }
+  .panel-body-fill {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  /* A fill panel hands its leftover height to the body, and the body has to
+     be a flex column for a `flex-1` child to grow — that is how the live
+     camera claims the space in Camera / Mission / Demo. */
+  .panel-fill > .panel-body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  /* A bare container for stacked rows (list panels), already padded. */
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--row-pad);
+  }
+  /* Row list used by timelines, detections, alerts, hazard cards. */
+  .rows {
+    display: flex;
+    flex-direction: column;
+    gap: var(--row-pad);
+  }
+  /* Horizontal escape hatch for single-row toolbars. A visible scrollbar
+     would eat a third of a 48px header, so this one is suppressed; the
+     content is still reachable. */
+  .scroll-x {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .scroll-x::-webkit-scrollbar {
+    height: 0;
+  }
+
   /* Inner info tile (Source / Resolution / Frames / detector rows). */
   .tile {
     @apply bg-surface-container-high/70;
   }
+  .tile-grid {
+    display: grid;
+    gap: var(--row-pad);
+  }
   /* Uppercase section title. */
   .heading-title {
     @apply font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-on-surface-variant;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   /* Tiny uppercase field label inside tiles. */
   .overline-label {
@@ -139,6 +358,7 @@
   .copy-value {
     @apply font-mono text-sm font-semibold text-on-surface;
   }
+
   /* Material symbol icon helper. */
   .msym {
     font-family: "Material Symbols Outlined";
