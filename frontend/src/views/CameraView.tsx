@@ -27,10 +27,11 @@ function fmtMs(value: number | null | undefined): string {
  *  sized from the available width, so squeezing the row would distort that box
  *  and force `cover` to crop. When the two rows together are taller than the
  *  viewport, `.page-scroll` scrolls — it is this view's designated scrolling
- *  region — instead of the frame being squashed. The monitoring strip keeps the
- *  share it already had. */
+ *  region — instead of the frame being squashed. The monitoring strip is also
+ *  content-sized: a percentage row reserved dead space below the camera even
+ *  when the panel had three lines of real telemetry. */
 const CAMERA_ROW = '0 0 auto'
-const MONITOR_ROW = '0 0 11%'
+const MONITOR_ROW = '0 0 auto'
 
 /**
  * LIVE OBSERVATION — the camera is the page.

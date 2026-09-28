@@ -145,7 +145,10 @@ export function MissionView({
       </section>
 
       {/* ── Main row: procedure · camera · crew & risk ───────────── */}
-      <div className="page-fill grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)]">
+      {/* Content-sized, not `page-fill`: the 16:9 camera sets this row's
+          height, so the leftover viewport space goes to the bottom strip
+          instead of stretching panels past their content into empty cards. */}
+      <div className="grid min-h-0 shrink-0 grid-cols-1 gap-[var(--grid-gap)] lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)]">
         {/* LEFT — procedure and next action */}
         <div className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-[var(--grid-gap)] overflow-hidden">
           <Panel
@@ -373,7 +376,10 @@ export function MissionView({
         </Panel>
 
         {/* RIGHT — crew, reasoning, alerts, risk */}
-        <div className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-[var(--grid-gap)] overflow-hidden">
+        {/* All `auto` rows: an alert feed that is empty (or has one entry)
+            must not become a several-hundred-pixel void. The list below is
+            height-capped and scrolls internally instead. */}
+        <div className="grid min-h-0 grid-rows-[auto_auto_auto_auto] gap-[var(--grid-gap)]">
           <Panel title="Astronaut Status">
             {snapshot?.astronaut_in_view ? (
               <>
@@ -462,7 +468,7 @@ export function MissionView({
             {safety.alerts.filter(a => !a.resolved).length === 0 ? (
               <EmptyState compact icon="notifications_off" title="No active alerts" />
             ) : (
-              <ul className="rows">
+              <ul className="rows max-h-40 overflow-y-auto">
                 {safety.alerts
                   .filter(a => !a.resolved)
                   .map(a => (
@@ -544,9 +550,12 @@ export function MissionView({
       </div>
 
       {/* ── Bottom strip: history, tracking, performance ──────────── */}
+      {/* The leftover viewport height belongs here: three real, variable-content
+          feeds that scroll internally. `page-fill` supplies the flex growth, so
+          only a floor is set — a fixed height left a dead band underneath. */}
       <div
-        className="page-fill shrink-0 grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
-        style={{ height: 'var(--strip-h)', flex: 'none' }}
+        className="page-fill grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
+        style={{ minHeight: 'var(--strip-h)' }}
       >
         <Panel
           title="Event Timeline"
