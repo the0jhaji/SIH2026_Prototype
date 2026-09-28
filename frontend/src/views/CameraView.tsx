@@ -122,7 +122,6 @@ export function CameraView({
               hazardLevels={hazardLevels}
               unattendedIds={unattendedIds}
               fill
-              aspect={frameW && frameH ? `${frameW} / ${frameH}` : '16 / 9'}
             />
             <CameraControls className="mt-2" />
 

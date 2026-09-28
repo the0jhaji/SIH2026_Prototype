@@ -3,8 +3,8 @@ import { expectedStep } from '../domain/experiment'
 import { MISSION_COLORS } from '../domain/safety'
 import { LiveFeed } from '../components/LiveFeed'
 import { CameraStage } from '../components/CameraStage'
-import { CameraControls } from '../components/CameraControls'
 import { useCamera } from '../hooks/cameraController'
+import { hazardLevelsFrom, resolveFrameSize, unattendedIdsFrom } from '../domain/detection'
 import { Badge, Empty, EmptyState, KeyValue, MetricCard, Panel, StatTile, SubCard } from './ui'
 import { PageShell, Timeline } from './layout'
 import { basEventEntries, severityColor } from './helpers'
@@ -39,17 +39,23 @@ const RESULT_TONE: Record<string, string> = {
  *
  * The strongest operational screen: the procedure, the feed it is judged
  * against and the classifier's reasoning share one row, so an operator can
- * see why a step was accepted or rejected without leaving the view. The
- * canvas feed is a *simulation* and says so on the frame; with the camera
- * running the real MJPEG feed replaces it.
+ * see why a step was accepted or rejected without leaving the view.
+ *
+ * The camera panel mounts the shared `CameraStage` — the same component, the
+ * same controller and the same `/api/camera/stream` connection the Mission page
+ * uses. It is deliberately not a copy of that page's camera code, and it is
+ * deliberately not allowed to substitute a synthetic canvas when the camera is
+ * off; a view that can draw a different picture of "the camera" is a view that
+ * can disagree with the rest of the app about what the crew is looking at.
  */
   export function ExperimentsView({
     state,
     engine,
-    engineOffline,
-    mode,
+    safety,
     detection,
     attendance,
+    engineOffline,
+    mode,
     connected,
     busy,
     onStart,
@@ -63,12 +69,31 @@ const RESULT_TONE: Record<string, string> = {
     const done = state.completedStepIds.length
     const progress = total > 0 ? Math.round((done / total) * 100) : 0
     // Camera state comes from the one controller, not from props.
-    const { streamActive: cameraRunning } = useCamera()
-  
-  const timeline = useMemo(() => basEventEntries(state.log, 50), [state.log])
-  const observed = state.currentDetected
-  const classification = state.lastClassification
-  const errorTotal = Object.values(state.errors).reduce((a, b) => a + b, 0)
+    const { phase, streamActive: cameraRunning } = useCamera()
+    // Same label vocabulary and same frame information as the Mission header.
+    const cameraLabel = phase === 'live' ? 'live' : phase
+
+    // The overlay is built from the same helpers the Mission page uses, so the
+    // two pages colour the same box the same way.
+    const hazardLevels = useMemo(
+      () => hazardLevelsFrom(safety.snapshot?.assessments),
+      [safety.snapshot],
+    )
+    const unattendedIds = useMemo(
+      () => unattendedIdsFrom(attendance.result?.watches),
+      [attendance.result?.watches],
+    )
+    // The same resolved frame the overlay divides by, so the number in this
+    // header is the number the boxes are actually scaled against.
+    const frame = useMemo(
+      () => resolveFrameSize(detection.result?.frameWidth, detection.result?.frameHeight),
+      [detection.result?.frameWidth, detection.result?.frameHeight],
+    )
+
+    const timeline = useMemo(() => basEventEntries(state.log, 50), [state.log])
+    const observed = state.currentDetected
+    const classification = state.lastClassification
+    const errorTotal = Object.values(state.errors).reduce((a, b) => a + b, 0)
 
   return (
     <PageShell>
@@ -222,44 +247,49 @@ const RESULT_TONE: Record<string, string> = {
 
         {/* Feed: the one element allowed to claim leftover height */}
         <Panel
-          title="Session Media"
+          title="Camera"
           fill
           scroll={false}
           right={
             <span className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">
-              {cameraRunning ? 'CAM-01 live' : 'canvas simulation'}
+              CAM-01 · {cameraLabel} ·{' '}
+              {frame ? `${frame.width}×${frame.height}` : '—'} ·{' '}
+              {detection.result?.detections.length ?? 0} objects
             </span>
           }
         >
           <div className="flex min-h-0 flex-1 flex-col gap-2">
-            {cameraRunning ? (
-              <CameraStage
-                detections={detection.result?.detections ?? []}
-                unknownDetections={detection.result?.unknownDetections ?? []}
-                frameWidth={detection.result?.frameWidth ?? null}
-                frameHeight={detection.result?.frameHeight ?? null}
-                unattendedIds={new Set(
-                  (attendance.result?.watches ?? [])
-                    .filter(w => w.state === 'UNATTENDED')
-                    .map(w => w.instanceId),
-                )}
-                fill
-              />
-            ) : (
+            {/*
+              The shared camera, not a copy of it. `CameraStage` reads the one
+              controller, opens the one MJPEG connection, derives the frame's own
+              aspect and renders the shared transport, so this panel is the same
+              picture as the Mission page's by construction.
+
+              It used to be a conditional: with the camera off this panel drew a
+              synthetic canvas instead, and with the camera on it passed no
+              aspect lock, so `cover` cropped the 16:9 frame to whatever height
+              the panel happened to have. Two different renderings of one camera,
+              which is exactly the bug this block exists to prevent.
+            */}
+            <CameraStage
+              detections={cameraRunning ? (detection.result?.detections ?? []) : []}
+              unknownDetections={cameraRunning ? (detection.result?.unknownDetections ?? []) : []}
+              frameWidth={cameraRunning ? (detection.result?.frameWidth ?? null) : null}
+              frameHeight={cameraRunning ? (detection.result?.frameHeight ?? null) : null}
+              hazardLevels={hazardLevels}
+              unattendedIds={unattendedIds}
+              fill
+            />
+
+            {mode === 'local' && (
+              /* The procedure illustration, kept but never in the camera slot and
+                 never labelled as a camera. It shows the box experiment's
+                 geometry; it is not a frame, and nothing detects on it. */
               <>
+                <p className="font-mono text-[10px] uppercase leading-snug tracking-wider text-on-surface-variant">
+                  Procedure illustration — not a camera feed
+                </p>
                 <LiveFeed state={state} />
-                {mode === 'backend' ? (
-                  /* The transport is the shared one, rendered outside the video
-                     branch. This view used to carry its own third copy of the
-                     buttons, disabled whenever the backend was briefly
-                     unreachable. */
-                  <CameraControls />
-                ) : (
-                  <p className="font-mono text-[10px] leading-snug text-on-surface-variant">
-                    Local simulator mode: the canvas is the feed. Switch to Backend in the header to
-                    use the real camera.
-                  </p>
-                )}
               </>
             )}
           </div>
@@ -484,4 +514,4 @@ const RESULT_TONE: Record<string, string> = {
       </div>
     </PageShell>
   )
-}
+  }

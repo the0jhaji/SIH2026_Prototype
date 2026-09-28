@@ -92,6 +92,35 @@ export const CAMERA_SNAPSHOT_URL = '/api/camera/snapshot'
 export const CAMERA_POLL_MS = 2500
 
 /**
+ * The one canonical aspect ratio of the shared feed, derived from the frame size
+ * the backend reports alongside the detections.
+ *
+ * This lives here, next to the stream URL, because the stream URL and the shape
+ * of the picture are the same fact seen twice. Every camera surface takes its
+ * aspect from this function rather than hardcoding `16 / 9`, so a camera that is
+ * reconfigured to another size renders correctly everywhere at once.
+ *
+ * It is also what makes two pages show the *same* framing. The camera box has to
+ * be locked to the frame's own shape: an unlocked box takes its height from the
+ * surrounding panel, so a 1280x720 frame arriving at a box of any other shape
+ * must either letterbox or be cropped, and the two pages then disagree about how
+ * much of the picture the operator can see. `CAMERA_DEFAULT_ASPECT` is the value
+ * used before any frame size is known — 1280x720 is the backend default
+ * (`CAMERA_WIDTH`/`CAMERA_HEIGHT`).
+ */
+export const CAMERA_DEFAULT_ASPECT = '16 / 9'
+
+export function frameAspect(
+  frameWidth: number | null | undefined,
+  frameHeight: number | null | undefined,
+): string {
+  if (typeof frameWidth !== 'number' || typeof frameHeight !== 'number') return CAMERA_DEFAULT_ASPECT
+  if (!Number.isFinite(frameWidth) || !Number.isFinite(frameHeight)) return CAMERA_DEFAULT_ASPECT
+  if (frameWidth <= 0 || frameHeight <= 0) return CAMERA_DEFAULT_ASPECT
+  return `${Math.round(frameWidth)} / ${Math.round(frameHeight)}`
+}
+
+/**
  * How long a *running* camera may go without advancing its frame counter before
  * the UI calls the feed stale.
  *

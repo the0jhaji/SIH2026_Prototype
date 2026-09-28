@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { CAMERA_STREAM_URL, cameraPhaseHint } from '../domain/camera'
+import { CAMERA_STREAM_URL, cameraPhaseHint, frameAspect } from '../domain/camera'
 import type { Detection } from '../domain/detection'
 import type { RiskLevel } from '../domain/safety'
 import { LiveCameraFeed } from './LiveFeed'
@@ -27,6 +27,7 @@ export function CameraViewport({
   fill = false,
   aspect,
   compact = false,
+  fullscreenHost = true,
 }: {
   detections: Detection[]
   unknownDetections: Detection[]
@@ -35,8 +36,20 @@ export function CameraViewport({
   hazardLevels?: Record<string, RiskLevel> | null
   unattendedIds?: ReadonlySet<string> | null
   fill?: boolean
+  /**
+   * Escape hatch only. The box is normally locked to the shared feed's own
+   * aspect (see `frameAspect`), so a view cannot accidentally render a different
+   * framing from another page by forgetting to pass anything.
+   */
   aspect?: string
   compact?: boolean
+  /**
+   * Whether this element is the element that goes `position: fixed` in
+   * fullscreen. `CameraStage` passes `false` because its own wrapper already
+   * takes the whole screen — viewport, transport and footer together — and two
+   * nested fixed layers stacked a second viewport on top of the first.
+   */
+  fullscreenHost?: boolean
 }) {
   const { phase, isFullscreen, streamActive, errorMessage } = useCamera()
 
@@ -44,6 +57,11 @@ export function CameraViewport({
   // is just late. Only a stopped or errored camera shows the placeholder.
   const showFeed = streamActive
   const hint = cameraPhaseHint(phase, errorMessage)
+
+  // One rule, applied identically on every page: the picture is locked to the
+  // shape of the frame the backend is actually serving. This is what makes two
+  // views of the same camera look the same.
+  const frameBox = aspect ?? frameAspect(frameWidth, frameHeight)
 
   const placeholderTitle =
     phase === 'error'
@@ -58,7 +76,7 @@ export function CameraViewport({
 
   return (
     <div
-      className={`camera-viewport ${isFullscreen ? 'camera-viewport-fullscreen' : ''} ${
+      className={`${fullscreenHost && isFullscreen ? 'camera-viewport-fullscreen ' : ''}${
         fill ? 'flex min-h-0 flex-1 flex-col' : 'flex flex-col'
       }`}
     >
@@ -73,24 +91,24 @@ export function CameraViewport({
             hazardLevels={hazardLevels}
             unattendedIds={unattendedIds}
             fill={fill}
-            fit="cover"
-            aspect={aspect}
+            fit="contain"
+            aspect={frameBox}
           />
         ) : (
           /* The placeholder takes the same aspect as the live image, so pressing
              CAM ON does not change the shape of the panel. */
           <div
-            className={`flex items-center justify-center bg-black ${
-              aspect ? 'aspect-video w-full' : fill ? 'min-h-[12rem] w-full flex-1' : 'min-h-[12rem] w-full'
-            }`}
-            style={aspect ? { aspectRatio: aspect } : undefined}
+            className="w-full bg-black"
+            style={{ aspectRatio: frameBox }}
           >
-            <EmptyState
-              icon="videocam_off"
-              title={placeholderTitle}
-              description={hint}
-              compact={compact || !fill}
-            />
+            <div className="flex h-full w-full items-center justify-center">
+              <EmptyState
+                icon="videocam_off"
+                title={placeholderTitle}
+                description={hint}
+                compact={compact || !fill}
+              />
+            </div>
           </div>
         )}
 
@@ -109,6 +127,11 @@ export function CameraViewport({
 
 /**
  * The shared camera block: a viewport and its transport, as siblings.
+ *
+ * This is the one camera surface every page mounts. It owns the viewport, the
+ * transport and the fullscreen layer, so a page cannot pick a different frame,
+ * a different framing or a second pair of CAM ON/OFF buttons — the divergence is
+ * structurally impossible rather than merely discouraged.
  *
  * The controls sit *outside* the viewport element and outside every conditional
  * in it, which is what makes "the feed appears but the controls do not"
@@ -151,6 +174,7 @@ export function CameraStage({
         unattendedIds={unattendedIds}
         fill={fill}
         aspect={aspect}
+        fullscreenHost={false}
       />
       <CameraControls className="mt-2" />
       {footer}

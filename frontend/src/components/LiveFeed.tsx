@@ -406,22 +406,26 @@ export function LiveCameraFeed({
   /**
    * How the frame fills its box.
    *
-   * `contain` (default) shows the whole frame and letterboxes the remainder.
-   * `cover` fills the box completely and crops the overflow, which is what a
-   * monitoring wall wants when empty margins are worse than losing the very
-   * edge of the picture. Either way the overlay is positioned on the measured
-   * image rect, so the boxes stay glued to the objects.
+   * The camera passes `contain` and always with an `aspect` lock, so the two
+   * modes are the same picture there — but `contain` is the one that is correct
+   * if they ever disagree: a letterbox shows the whole frame, whereas `cover`
+   * would silently crop the centre out of a frame whose shape no longer matches
+   * the box. `cover` stays available for a box that must be filled edge to edge.
+   *
+   * Either way the overlay is positioned on the measured image rect, so the
+   * boxes stay glued to the objects.
    */
   fit?: 'contain' | 'cover'
   /**
-   * Lock the box to a frame aspect, e.g. `'16 / 9'`, and let its width decide
+   * Lock the box to the frame aspect, e.g. `'16 / 9'`, and let its width decide
    * the height instead of the panel's height deciding both.
    *
    * This is what a surveillance viewport wants: the box is exactly the shape of
    * the camera, so the frame fills it edge to edge with no letterbox and
    * nothing cropped, and the overlay rect equals the box. Without it the box is
-   * stretched to whatever the panel allows and `cover` has to crop away the
-   * mismatch.
+   * stretched to whatever the panel allows and the frame has to be cropped or
+   * letterboxed to fit — which is how two pages of the same camera end up
+   * showing the same feed cropped differently.
    */
   aspect?: string
 }) {

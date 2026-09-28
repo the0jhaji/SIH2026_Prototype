@@ -17,15 +17,22 @@
  * in `CameraControls`, which is a sibling of the viewport and reads no camera
  * prop. A test cannot fail that back into existence, which is why the structure
  * (not a test) is the guarantee, and this suite guards the state half.
+ *
+ * The last block is the one thing a test *can* fail back into existence: the
+ * aspect of the camera box. Two pages can be handed the same frame and still
+ * disagree about how much of it is visible if the box's shape is decided per
+ * page, so that decision lives in one pure function which is asserted here.
  */
 
 import {
+  CAMERA_DEFAULT_ASPECT,
   CAMERA_PHASE_LABEL,
   CAMERA_STALE_MS,
   CAMERA_START_LABEL,
   CAMERA_STOP_LABEL,
   cameraPhaseHint,
   derivePhase,
+  frameAspect,
 } from '../src/domain/camera.ts'
 
 let failures = 0
@@ -179,6 +186,47 @@ check(
 check(
   'every phase offers CAM ON, so the camera is always restartable',
   allPhases.every(p => CAMERA_START_LABEL[p].length > 0),
+)
+
+// ── The shared frame contract ──────────────────────────────────────────────
+// The Mission and Demo pages once drew the same camera differently: the Mission
+// panel locked its box to 16:9 and the Demo panel did not, so `object-cover`
+// cropped the identical 1280x720 frame to whatever height each panel happened to
+// have. The camera source was never the problem — the shape of the box around it
+// was. `frameAspect` is now the single owner of that shape, and it is derived
+// from the frame size the backend reports with the detections, which is also the
+// size the overlay divides by. These checks pin that derivation down.
+console.log('shared frame contract')
+
+check(
+  'the reported frame size becomes the box aspect',
+  frameAspect(1280, 720) === '1280 / 720',
+  frameAspect(1280, 720),
+)
+check(
+  'the default is the backend default resolution',
+  CAMERA_DEFAULT_ASPECT === '16 / 9' && frameAspect(1280, 720) === '1280 / 720',
+  `default=${CAMERA_DEFAULT_ASPECT} derived=${frameAspect(1280, 720)}`,
+)
+check(
+  'an unknown frame size falls back to 16:9, not to a stretched box',
+  [frameAspect(null, null), frameAspect(undefined, undefined), frameAspect(null, 720)].every(
+    a => a === CAMERA_DEFAULT_ASPECT,
+  ),
+)
+check(
+  'a nonsensical frame size falls back instead of producing an invalid aspect',
+  [frameAspect(0, 720), frameAspect(1280, 0), frameAspect(-1280, 720), frameAspect(NaN, 720)].every(
+    a => a === CAMERA_DEFAULT_ASPECT,
+  ),
+)
+check(
+  'the aspect is a valid CSS ratio for any camera size',
+  frameAspect(640, 480) === '640 / 480' && frameAspect(1920, 1080) === '1920 / 1080',
+)
+check(
+  'every page derives the same box from the same frame',
+  frameAspect(1280, 720) === frameAspect(1280, 720) && frameAspect(1280, 720) === '1280 / 720',
 )
 
 if (failures > 0) {

@@ -278,6 +278,10 @@ export function MissionView({
         >
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="flex min-h-0 flex-1">
+              {/* The shared camera stage. It derives the box's aspect from
+                  `frameWidth`/`frameHeight` itself, so no page has to remember
+                  to lock the frame to 16:9 — which is how a second page ended
+                  up cropping the very same feed differently. */}
               <CameraStage
                 detections={detections}
                 unknownDetections={unknownDetections}
@@ -286,7 +290,6 @@ export function MissionView({
                 hazardLevels={hazardLevels}
                 unattendedIds={unattendedIds}
                 fill
-                aspect={frameW && frameH ? `${frameW} / ${frameH}` : '16 / 9'}
               />
             </div>
             <div className="mt-[var(--grid-gap)] grid shrink-0 grid-cols-1 gap-[var(--grid-gap)] sm:grid-cols-3">
