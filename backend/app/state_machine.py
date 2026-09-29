@@ -27,6 +27,8 @@ from .schemas import (
 CLASSIFICATION_KINDS = {
     "STEP_MATCHED",
     "OUT_OF_SEQUENCE",
+    "WRONG_OBJECT",
+    "WRONG_SEQUENCE",
     "SKIPPED_STEP",
     "REPEATED_STEP",
     "UNKNOWN_ACTIVITY",
@@ -37,6 +39,8 @@ CLASSIFICATION_KINDS = {
 RESULT_BY_KIND = {
     "STEP_MATCHED": "CORRECT",
     "OUT_OF_SEQUENCE": "OUT_OF_SEQUENCE",
+    "WRONG_OBJECT": "WRONG_OBJECT",
+    "WRONG_SEQUENCE": "WRONG_SEQUENCE",
     "SKIPPED_STEP": "SKIPPED",
     "REPEATED_STEP": "REPEATED",
     "UNKNOWN_ACTIVITY": "UNKNOWN",
@@ -47,20 +51,57 @@ RESULT_BY_KIND = {
 def severity_of(kind: EventKind) -> EventSeverity:
     if kind in ("STEP_MATCHED", "EXPERIMENT_COMPLETED"):
         return "ok"
-    if kind in ("OUT_OF_SEQUENCE", "REPEATED_STEP"):
+    if kind in ("OUT_OF_SEQUENCE", "WRONG_OBJECT", "WRONG_SEQUENCE", "REPEATED_STEP"):
         return "error"
     if kind in ("SKIPPED_STEP", "UNKNOWN_ACTIVITY", "LOW_CONFIDENCE", "EXPERIMENT_STOPPED"):
         return "warn"
     return "info"
 
 
+def wrong_step_kind(expected: Optional[StepDef], observed: Optional[StepDef]) -> str:
+    """Refine a later-than-expected detection into a precise classification.
+
+    Only steps that carry both ``action`` and ``object`` can be refined:
+      * same action, different object  -> WRONG_OBJECT (e.g. picked the yellow
+        box when the red box was expected);
+      * same object, different action  -> WRONG_SEQUENCE (e.g. PLACE before
+        PICK on the same box);
+      * anything else                  -> OUT_OF_SEQUENCE.
+    Legacy steps without that metadata always stay OUT_OF_SEQUENCE.
+    """
+    if (
+        expected is not None
+        and observed is not None
+        and expected.action
+        and observed.action
+        and expected.object
+        and observed.object
+    ):
+        if expected.action == observed.action and expected.object != observed.object:
+            return "WRONG_OBJECT"
+        if expected.object == observed.object and expected.action != observed.action:
+            return "WRONG_SEQUENCE"
+    return "OUT_OF_SEQUENCE"
+
+
 def voice_instruction(step: Optional[StepDef], fallback: str) -> str:
     if step is None:
         return f"{fallback}."
+    if step.voiceInstruction:
+        return f"Please {step.voiceInstruction}."
     parts = step.label.split(" ", 1)
     verb = parts[0].lower()
     obj = parts[1].lower() if len(parts) > 1 else "next step"
     return f"Please {verb} the {obj}."
+
+
+def _object_speech(object_kind: Optional[str]) -> str:
+    """Short spoken phrase for an ObjectKind token (WRONG_OBJECT prompts)."""
+    return {
+        "MAIN_BOX": "the main box",
+        "RED_BOX": "the red box",
+        "YELLOW_BOX": "the yellow box",
+    }.get(object_kind or "", str(object_kind or "the next step").lower().replace("_", " "))
 
 
 class ExperimentSession:
@@ -77,6 +118,8 @@ class ExperimentSession:
         self.last_classification: Optional[ExpEvent] = None
         self.errors = {
             "outOfSequence": 0,
+            "wrongObject": 0,
+            "wrongSequence": 0,
             "skipped": 0,
             "repeated": 0,
             "unknown": 0,
@@ -218,16 +261,37 @@ class ExperimentSession:
             )
             return [self._track("repeated", event)]
 
-        # Known activity belonging to a later step: out of sequence, and the
-        # expected step was consequently skipped. The out-of-sequence event is
-        # the primary classification; the skip advisory is secondary.
+        # Known activity belonging to a later step: the expected step was
+        # skipped. The primary classification is refined when the steps carry
+        # action/object metadata (wrong recourse: WRONG_OBJECT when the same
+        # action hit a different object, WRONG_SEQUENCE when the right object
+        # got the wrong action, else OUT_OF_SEQUENCE); the skip advisory is
+        # secondary.
+        kind = wrong_step_kind(expected, detected_step)
+        counter = {
+            "WRONG_OBJECT": "wrongObject",
+            "WRONG_SEQUENCE": "wrongSequence",
+            "OUT_OF_SEQUENCE": "outOfSequence",
+        }[kind]
+        if kind == "WRONG_OBJECT":
+            message = f"Wrong object: {detection.activity} while expected {expected.activity if expected else 'unknown'}."
+            voice = (
+                f"Warning. {_object_speech(expected.object).capitalize()} is expected, "
+                f"not {_object_speech(detected_step.object)}."
+            )
+        elif kind == "WRONG_SEQUENCE":
+            message = f"Wrong sequence: {detection.activity} while expected {expected.activity if expected else 'unknown'}."
+            voice = f"Warning. Wrong sequence. {voice_instruction(expected, 'Please follow the sequence')}"
+        else:
+            message = f"Out of sequence: {detection.activity} while expected {expected.activity if expected else 'unknown'}."
+            voice = f"Incorrect sequence. {voice_instruction(expected, 'Please follow the sequence')}"
         primary = self._append(
-            "OUT_OF_SEQUENCE",
-            f"Out of sequence: {detection.activity} while expected {expected.activity if expected else 'unknown'}.",
+            kind,
+            message,
             activity=detection.activity,
             confidence=detection.confidence,
             expected=expected.activity if expected else None,
-            voice=f"Incorrect sequence. {voice_instruction(expected, 'Please follow the sequence')}",
+            voice=voice,
         )
         advisory = self._append(
             "SKIPPED_STEP",
@@ -237,7 +301,7 @@ class ExperimentSession:
             voice=voice_instruction(expected, "Please follow the sequence"),
         )
         self.last_classification = primary
-        self.errors["outOfSequence"] += 1
+        self.errors[counter] += 1
         self.errors["skipped"] += 1
         return [primary, advisory]
 
@@ -254,6 +318,8 @@ class ExperimentSession:
             lastClassification=self.last_classification,
             errors=ErrorCounters(
                 outOfSequence=self.errors["outOfSequence"],
+                wrongObject=self.errors["wrongObject"],
+                wrongSequence=self.errors["wrongSequence"],
                 skipped=self.errors["skipped"],
                 repeated=self.errors["repeated"],
                 unknown=self.errors["unknown"],

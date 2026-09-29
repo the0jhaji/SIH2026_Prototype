@@ -44,6 +44,7 @@ from camera import CameraManager, CameraSettings
 
 from . import config
 from .activity_perception import LiveActivityPerception, MockActivityPerception
+from .interaction_perception import InteractionActivityPerception
 from .attendance import AttendanceMonitor
 from .detection_service import DetectionService
 from .experiment import load_active_experiment
@@ -105,9 +106,11 @@ def create_app(
     ``detection_service`` injects the whole service (tests use a stub with a
     ``latest()``/``status()`` contract); when omitted it is built internally.
 
-    ``activity_backend`` (``mock`` | ``live`` | ``sim``) overrides
-    ``ACTIVITY_BACKEND`` for tests; when ``sim_script`` is injected the
-    simulator is always used so existing callers keep the scripted feed.
+    ``activity_backend`` (``interaction`` | ``live`` | ``mock`` | ``sim``)
+    overrides ``ACTIVITY_BACKEND`` for tests; when ``sim_script`` is injected
+    the simulator is always used so existing callers keep the scripted feed.
+    ``interaction`` is the default and the only source that grounds steps in
+    object motion (see ``app/interaction_perception.py``).
 
     The ``safety_*`` parameters inject the Astronaut Safety pipeline pieces
     (tests) or let tests slow/fast the monitor loop / disable autostart.
@@ -198,10 +201,21 @@ def create_app(
         stale_after_ms=config.ACTIVITY_STALE_MS,
         current_index=lambda: service.session.current_step_index,
     )
+    interaction_perception = InteractionActivityPerception(
+        exp,
+        detection_service,
+        poll_ms=config.ACTIVITY_POLL_MS,
+        conf_threshold=config.DETECTION_CONF_THRESHOLD,
+        stale_after_ms=config.ACTIVITY_STALE_MS,
+        confirm_polls=2,
+        target_box=config.ACTIVITY_TARGET_AREA,
+        current_index=lambda: service.session.current_step_index,
+    )
 
     sources = {
         "mock": mock_perception,
         "live": live_perception,
+        "interaction": interaction_perception,
         "sim": simulator,
     }
 
@@ -306,6 +320,7 @@ def create_app(
     app.state.simulator = simulator
     app.state.mock_perception = mock_perception
     app.state.live_perception = live_perception
+    app.state.interaction_perception = interaction_perception
     app.state.camera_manager = camera_manager
     app.state.detection_service = detection_service
     app.state.safety_service = safety_service
@@ -347,6 +362,22 @@ def create_app(
     async def stop() -> dict:
         return await service.stop()
 
+    @app.get("/api/experiment/perception")
+    async def perception_status() -> dict:
+        """Active activity-perception source + its grounding evidence.
+
+        The event-grounded (``interaction``) source reports the per-object
+        action facts it has actually verified and the last raw tracker events,
+        so the UI can show *why* a step did or did not fire.
+        """
+        source = perception_source()
+        status = getattr(source, "status", None)
+        return {
+            "backend": perception_backend,
+            "source": source.name,
+            "evidence": status() if callable(status) else None,
+        }
+
     @app.get("/api/logs")
     async def logs() -> dict:
         return {"events": store.all()}
@@ -359,7 +390,10 @@ def create_app(
 
     @app.get("/api/experiment/v2/voice")
     async def engine_voice() -> dict:
-        return {"health": voice_service.health, "queue_size": voice_service.queue_size}
+        # Full lifecycle (state/ready/error), not a free-form health string: the
+        # dashboard must be able to render NOT_STARTED/STARTING/READY/ERROR and
+        # show the real startup error instead of guessing.
+        return voice_service.status()
 
     @app.post("/api/experiment/v2/start")
     async def engine_start() -> dict:

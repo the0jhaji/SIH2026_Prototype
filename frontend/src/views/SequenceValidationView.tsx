@@ -119,6 +119,8 @@ function ChipResult({ result }: { result: string }) {
   const styles: Record<string, string> = {
     CORRECT: 'border-primary/60 bg-primary/10 text-primary',
     OUT_OF_SEQUENCE: 'border-error/60 bg-error/10 text-error',
+    WRONG_OBJECT: 'border-error/60 bg-error/10 text-error',
+    WRONG_SEQUENCE: 'border-error/60 bg-error/10 text-error',
     SKIPPED: 'border-secondary/60 bg-secondary/10 text-secondary',
     REPEATED: 'border-error/60 bg-error/10 text-error',
     UNKNOWN: 'border-outline/60 bg-surface-container-low text-on-surface-variant',

@@ -33,6 +33,8 @@ REQUIRED_STEP_FIELDS = {"id", "order", "activity", "label", "description", "expe
 CANONICAL_RESULTS = [
     "CORRECT",
     "OUT_OF_SEQUENCE",
+    "WRONG_OBJECT",
+    "WRONG_SEQUENCE",
     "SKIPPED",
     "REPEATED",
     "UNKNOWN",
@@ -42,6 +44,8 @@ CANONICAL_RESULTS = [
 CANONICAL_KINDS = [
     "STEP_MATCHED",
     "OUT_OF_SEQUENCE",
+    "WRONG_OBJECT",
+    "WRONG_SEQUENCE",
     "SKIPPED_STEP",
     "REPEATED_STEP",
     "UNKNOWN_ACTIVITY",
@@ -53,6 +57,12 @@ CANONICAL_KINDS = [
     "RECORDING_STOPPED",
 ]
 
+#: The KINDS above that classify a detection, in order — the prefix the
+#: errorTypes table mirrors one-to-one.
+CLASSIFICATION_KINDS = CANONICAL_KINDS[:8]
+
+EVIDENCE_KINDS = {"PRESENT", "MOVED", "PLACED"}
+
 
 @pytest.fixture(scope="module")
 def experiment() -> dict:
@@ -62,7 +72,7 @@ def experiment() -> dict:
 def test_experiment_definition_loads() -> None:
     assert EXPERIMENT_PATH.is_file(), f"missing {EXPERIMENT_PATH}"
     data = json.loads(EXPERIMENT_PATH.read_text(encoding="utf-8"))
-    assert data["schemaVersion"] == "1.0"
+    assert data["schemaVersion"] == "1.1"
     assert data["prototype"] is True
     assert data["name"] == "BAS Box Handling Experiment"
     assert data["disclaimer"] and "NOT the official ISRO sequence" in data["disclaimer"]
@@ -146,7 +156,7 @@ def test_error_types_are_consistent(experiment) -> None:
     codes = [err["code"] for err in experiment["errorTypes"]]
     kinds = [err["kind"] for err in experiment["errorTypes"]]
     assert codes == rules["canonicalResultLabels"], f"error codes {codes}"
-    assert kinds == rules["canonicalEventKinds"][:6], f"error kinds {kinds}"
+    assert kinds == CLASSIFICATION_KINDS, f"error kinds {kinds}"
     matched = {err["code"]: err for err in experiment["errorTypes"] if err["kind"] == "STEP_MATCHED"}
     assert matched["CORRECT"]["advance"] is True
     for err in experiment["errorTypes"]:
@@ -158,15 +168,94 @@ def test_worked_example_matches_error_types(experiment) -> None:
     example = experiment["example"]
     assert example["expected"] == "PICK_RED"
     assert example["observed"] == "PICK_YELLOW"
-    assert example["result"] == "OUT_OF_SEQUENCE"
+    # Same action, different object: the refined classification, not the
+    # generic one.
+    assert example["result"] == "WRONG_OBJECT"
     assert example["nextExpected"] == "PICK_RED"
     kinds = {err["code"] for err in experiment["errorTypes"]}
     assert example["result"] in kinds
-    out_of_seq = next(err for err in experiment["errorTypes"] if err["code"] == "OUT_OF_SEQUENCE")
-    assert out_of_seq["advance"] is False
+    wrong_object = next(err for err in experiment["errorTypes"] if err["code"] == "WRONG_OBJECT")
+    assert wrong_object["advance"] is False
+
+
+def test_expected_events_are_a_valid_evidence_contract(experiment) -> None:
+    """Every step declares the tracker evidence that satisfies it."""
+    object_ids = {obj["id"] for obj in experiment["objects"]}
+    assert set(experiment["evidenceKinds"]) == EVIDENCE_KINDS
+    assert experiment["evidenceNotes"], "the evidence contract must state its own limits"
+    for step in experiment["steps"]:
+        events = step.get("expectedEvents")
+        assert events, f"step {step['id']} declares no expectedEvents"
+        for rule in events:
+            assert rule["event"] in EVIDENCE_KINDS, rule
+            objects = rule["object"] if isinstance(rule["object"], list) else [rule["object"]]
+            assert objects, f"step {step['id']} has an evidence rule with no object"
+            for obj in objects:
+                assert obj in object_ids, f"step {step['id']} references unknown object {obj!r}"
+
+
+def test_action_and_object_metadata_support_the_refinement(experiment) -> None:
+    """The recourse classification is only possible where the metadata exists.
+
+    A step pair sharing an action must differ in object (WRONG_OBJECT) and a
+    pair sharing an object must differ in action (WRONG_SEQUENCE) for the
+    example in experiment["example"] to be classifiable at all.
+    """
+    by_activity = {step["activity"]: step for step in experiment["steps"]}
+    pick_red = by_activity["PICK_RED"]
+    pick_yellow = by_activity["PICK_YELLOW"]
+    assert pick_red["action"] == pick_yellow["action"] == "PICK"
+    assert pick_red["object"] == "RED_BOX"
+    assert pick_yellow["object"] == "YELLOW_BOX"
+    place_red = by_activity["PLACE_RED"]
+    assert place_red["action"] == "PLACE" and place_red["object"] == "RED_BOX"
+    # Steps that are pure presence or terminal bookkeeping carry no action.
+    assert by_activity["APPROACH"]["action"] is None
+    assert by_activity["COMPLETE"]["action"] is None
 
 
 def test_step_activities_all_defined(experiment) -> None:
     activities = set(experiment["activities"])
     for step in experiment["steps"]:
         assert step["activity"] in activities, f"step {step['id']} has undefined activity"
+
+
+def test_no_step_requires_a_class_no_detector_can_see(experiment) -> None:
+    """Every grounding class must be emitted by some shipped detector.
+
+    ``experiment_box`` is declared in the object table but no shipped model
+    produces it (the custom model knows only red/yellow; the heuristic detector
+    sees person/red/yellow). Grounding OPEN_BOX on it would stall the run at
+    step 2 forever with no error, which is the silent failure this guards.
+
+    ``target_area`` is deliberately NOT in this set: it is a fixed piece of
+    station hardware, not something a model can see. It is supplied by
+    ``ACTIVITY_TARGET_AREA`` config instead, and the run reports
+    ``placedGrounded=false`` when that is unset.
+    """
+    detectable = {"person", "red_box", "yellow_box"}
+    for step in experiment["steps"]:
+        for rule in step["expectedEvents"]:
+            objects = rule["object"] if isinstance(rule["object"], list) else [rule["object"]]
+            for obj in objects:
+                assert obj in detectable, (
+                    f"step {step['id']} requires {obj!r}, which no shipped detector emits"
+                )
+
+    by_activity = {step["activity"]: step for step in experiment["steps"]}
+    open_box = by_activity["OPEN_BOX"]
+    assert open_box["expectedEvents"] == [
+        {"event": "MOVED", "object": ["red_box", "yellow_box"]}
+    ]
+    # And the limitation is stated, not hidden.
+    assert "no container or lid detector" in experiment["evidenceNotes"]["KNOWN_LIMITS"]
+
+
+def test_every_step_has_an_imperative_voice_instruction(experiment) -> None:
+    """Voice prompts are data, because labels are third-person operator prose."""
+    for step in experiment["steps"]:
+        assert step["voiceInstruction"], f"step {step['id']} has no voiceInstruction"
+        assert not step["voiceInstruction"].lower().startswith(("please", "astronaut", "the astronaut"))
+    # The spoken form is imperative even though the label is not.
+    assert experiment["steps"][2]["label"].startswith("Astronaut ")
+    assert experiment["steps"][2]["voiceInstruction"] == "pick up the red box"

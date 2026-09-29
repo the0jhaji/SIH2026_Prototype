@@ -5,11 +5,11 @@ in this module emits exactly the ``Detection`` shape the state machine already
 consumes, so swapping the source never touches decision-making.
 
 Implementations:
-  * ``LiveActivityPerception`` (default, ``ACTIVITY_BACKEND=live``): the
-    camera-grounded source. It polls the object-detection service and only
-    emits a ``Detection`` when the currently expected step's
-    ``expectedObjects`` are all present on a fresh frame — the experiment
-    advances on what is actually in front of the camera, nothing scripted.
+  * ``LiveActivityPerception`` (``ACTIVITY_BACKEND=live``): the visibility
+    source. It polls the object-detection service and only emits a
+    ``Detection`` when the currently expected step's ``expectedObjects`` are
+    all present on a fresh frame. It cannot tell a PICK from a PASS-BY, which
+    is why it is no longer the default.
   * ``MockActivityPerception`` (``ACTIVITY_BACKEND=mock``): deterministic,
     **derived from the loaded experiment definition itself** — the correct
     steps plus a fixed, experiment-agnostic set of planted mistakes so a run
@@ -18,8 +18,11 @@ Implementations:
   * ``SimulatedPerception`` (``ACTIVITY_BACKEND=sim``): the original scripted
     feed, kept for tests and backwards compatibility.
 
-A real activity-recognition model plugs in at this same seam later (same
-Detection shape) — no state-machine change required.
+The default source is ``app/interaction_perception.py``
+(``InteractionActivityPerception``, ``ACTIVITY_BACKEND=interaction``), which
+grounds each step in the interaction tracker's motion/placement evidence rather
+than mere visibility. A real activity-recognition model can plug in at this same
+seam later (same Detection shape) — no state-machine change required.
 """
 
 import asyncio

@@ -1,0 +1,32 @@
+{
+  "schema": "astra-experiment-selection/1",
+  "budget_per_session": 24,
+  "sessions": {
+    "s1": {
+      "activity": null,
+      "label": null,
+      "frame_ids": [
+        1,
+        2,
+        3,
+        4,
+        10,
+        19,
+        25,
+        28,
+        37,
+        46,
+        47,
+        48,
+        49,
+        50
+      ],
+      "n_frames": 14
+    }
+  },
+  "critical_by_activity": {},
+  "totals": {
+    "sessions_sampled": 1,
+    "frames_selected": 14
+  }
+}

@@ -1,0 +1,1388 @@
+{
+  "schema": "astra-experiment-annotation/1",
+  "session_id": "session_20260829_233703_6weu",
+  "frames": {
+    "1": {
+      "frame_id": 1,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000001.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            480.27,
+            396.81,
+            500.5,
+            267.34
+          ],
+          "yolo": [
+            0.570719,
+            0.736778,
+            0.391016,
+            0.371306
+          ]
+        },
+        {
+          "class": "person",
+          "class_id": 0,
+          "bbox": [
+            579.3,
+            245.57,
+            263.03,
+            146.98
+          ],
+          "yolo": [
+            0.555324,
+            0.443139,
+            0.205492,
+            0.204139
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000001",
+      "reviewed_at": "2026-09-28T20:02:02+00:00"
+    },
+    "2": {
+      "frame_id": 2,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000002.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            465.7,
+            398.01,
+            510.94,
+            264.84
+          ],
+          "yolo": [
+            0.563414,
+            0.736708,
+            0.399172,
+            0.367833
+          ]
+        },
+        {
+          "class": "yellow_target_area",
+          "class_id": 5,
+          "bbox": [
+            18.0,
+            548.0,
+            303.0,
+            172.0
+          ],
+          "yolo": [
+            0.132422,
+            0.880556,
+            0.236719,
+            0.238889
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000002",
+      "reviewed_at": "2026-09-28T20:02:02+00:00"
+    },
+    "3": {
+      "frame_id": 3,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000003.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            467.03,
+            396.68,
+            496.3,
+            262.18
+          ],
+          "yolo": [
+            0.558734,
+            0.733014,
+            0.387734,
+            0.364139
+          ]
+        },
+        {
+          "class": "yellow_target_area",
+          "class_id": 5,
+          "bbox": [
+            20.23,
+            557.64,
+            228.95,
+            157.63
+          ],
+          "yolo": [
+            0.105238,
+            0.883965,
+            0.178867,
+            0.218931
+          ]
+        },
+        {
+          "class": "person",
+          "class_id": 0,
+          "bbox": [
+            573.98,
+            241.31,
+            286.46,
+            154.44
+          ],
+          "yolo": [
+            0.560316,
+            0.4424,
+            0.223794,
+            0.214497
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000003",
+      "reviewed_at": "2026-09-28T20:02:02+00:00"
+    },
+    "4": {
+      "frame_id": 4,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000004.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            438.74,
+            413.85,
+            542.03,
+            260.95
+          ],
+          "yolo": [
+            0.554493,
+            0.75601,
+            0.423461,
+            0.362426
+          ]
+        },
+        {
+          "class": "person",
+          "class_id": 0,
+          "bbox": [
+            579.3,
+            241.31,
+            193.81,
+            159.76
+          ],
+          "yolo": [
+            0.528286,
+            0.446098,
+            0.151414,
+            0.221893
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000004",
+      "reviewed_at": "2026-09-28T20:02:02+00:00"
+    },
+    "15": {
+      "frame_id": 15,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000015.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "red_box",
+          "class_id": 2,
+          "bbox": [
+            401.83,
+            266.26,
+            284.74,
+            133.09
+          ],
+          "yolo": [
+            0.425156,
+            0.462229,
+            0.222453,
+            0.184847
+          ]
+        },
+        {
+          "class": "person",
+          "class_id": 0,
+          "bbox": [
+            237.0,
+            221.0,
+            737.0,
+            491.0
+          ],
+          "yolo": [
+            0.473047,
+            0.647917,
+            0.575781,
+            0.681944
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000015",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "16": {
+      "frame_id": 16,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000016.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            482.4,
+            565.1,
+            498.37,
+            135.27
+          ],
+          "yolo": [
+            0.571551,
+            0.878799,
+            0.389352,
+            0.187875
+          ]
+        },
+        {
+          "class": "red_box",
+          "class_id": 2,
+          "bbox": [
+            369.52,
+            232.79,
+            307.75,
+            178.93
+          ],
+          "yolo": [
+            0.408902,
+            0.447578,
+            0.240433,
+            0.248521
+          ]
+        },
+        {
+          "class": "person",
+          "class_id": 0,
+          "bbox": [
+            239.6,
+            232.79,
+            733.71,
+            484.62
+          ],
+          "yolo": [
+            0.473794,
+            0.659856,
+            0.573211,
+            0.673077
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000016",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "30": {
+      "frame_id": 30,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000030.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            532.45,
+            577.88,
+            458.97,
+            137.4
+          ],
+          "yolo": [
+            0.595262,
+            0.898028,
+            0.35857,
+            0.190833
+          ]
+        },
+        {
+          "class": "person",
+          "class_id": 0,
+          "bbox": [
+            535.64,
+            257.29,
+            361.0,
+            346.15
+          ],
+          "yolo": [
+            0.559484,
+            0.597729,
+            0.282031,
+            0.480764
+          ]
+        },
+        {
+          "class": "yellow_target_area",
+          "class_id": 5,
+          "bbox": [
+            76.67,
+            587.46,
+            208.72,
+            131.01
+          ],
+          "yolo": [
+            0.14143,
+            0.906896,
+            0.163062,
+            0.181958
+          ]
+        },
+        {
+          "class": "red_target_area",
+          "class_id": 4,
+          "bbox": [
+            20.23,
+            557.64,
+            302.43,
+            157.63
+          ],
+          "yolo": [
+            0.133941,
+            0.883965,
+            0.236273,
+            0.218931
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000030",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "31": {
+      "frame_id": 31,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000031.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "red_target_area",
+          "class_id": 4,
+          "bbox": [
+            27.69,
+            577.88,
+            255.57,
+            141.66
+          ],
+          "yolo": [
+            0.121465,
+            0.900986,
+            0.199664,
+            0.19675
+          ]
+        },
+        {
+          "class": "yellow_target_area",
+          "class_id": 5,
+          "bbox": [
+            1.06,
+            558.71,
+            343.96,
+            149.11
+          ],
+          "yolo": [
+            0.135187,
+            0.879535,
+            0.268719,
+            0.207097
+          ]
+        },
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            499.43,
+            591.72,
+            469.62,
+            91.6
+          ],
+          "yolo": [
+            0.573625,
+            0.885444,
+            0.366891,
+            0.127222
+          ]
+        },
+        {
+          "class": "person",
+          "class_id": 0,
+          "bbox": [
+            484.53,
+            269.0,
+            520.73,
+            322.72
+          ],
+          "yolo": [
+            0.581949,
+            0.597722,
+            0.40682,
+            0.448222
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000031",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "39": {
+      "frame_id": 39,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000039.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "person",
+          "class_id": 0,
+          "bbox": [
+            224.0,
+            233.0,
+            694.0,
+            470.0
+          ],
+          "yolo": [
+            0.446094,
+            0.65,
+            0.542188,
+            0.652778
+          ]
+        },
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            447.25,
+            648.17,
+            489.85,
+            69.23
+          ],
+          "yolo": [
+            0.540765,
+            0.948317,
+            0.382696,
+            0.096154
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000039",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "46": {
+      "frame_id": 46,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000046.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "yellow_box",
+          "class_id": 3,
+          "bbox": [
+            601.66,
+            426.63,
+            143.76,
+            134.2
+          ],
+          "yolo": [
+            0.526203,
+            0.685736,
+            0.112312,
+            0.186389
+          ]
+        },
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            485.59,
+            643.91,
+            421.7,
+            64.97
+          ],
+          "yolo": [
+            0.544094,
+            0.939437,
+            0.329453,
+            0.090236
+          ]
+        },
+        {
+          "class": "person",
+          "class_id": 0,
+          "bbox": [
+            243.86,
+            241.31,
+            690.05,
+            477.16
+          ],
+          "yolo": [
+            0.460067,
+            0.666513,
+            0.539101,
+            0.662722
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000046",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "52": {
+      "frame_id": 52,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000052.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "yellow_box",
+          "class_id": 3,
+          "bbox": [
+            669.27,
+            266.26,
+            191.6,
+            131.76
+          ],
+          "yolo": [
+            0.597711,
+            0.461306,
+            0.149688,
+            0.183
+          ]
+        },
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            473.68,
+            633.58,
+            449.73,
+            77.19
+          ],
+          "yolo": [
+            0.545738,
+            0.933576,
+            0.351352,
+            0.107208
+          ]
+        },
+        {
+          "class": "person",
+          "class_id": 0,
+          "bbox": [
+            300.3,
+            210.42,
+            625.09,
+            500.59
+          ],
+          "yolo": [
+            0.478785,
+            0.639885,
+            0.488353,
+            0.695266
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000052",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "61": {
+      "frame_id": 61,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000061.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "yellow_box",
+          "class_id": 3,
+          "bbox": [
+            294.05,
+            307.51,
+            227.53,
+            127.76
+          ],
+          "yolo": [
+            0.318605,
+            0.515819,
+            0.177758,
+            0.177444
+          ]
+        },
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            516.26,
+            613.61,
+            393.85,
+            101.15
+          ],
+          "yolo": [
+            0.557176,
+            0.922479,
+            0.307695,
+            0.140486
+          ]
+        },
+        {
+          "class": "yellow_target_area",
+          "class_id": 5,
+          "bbox": [
+            17.04,
+            609.83,
+            332.25,
+            106.51
+          ],
+          "yolo": [
+            0.143098,
+            0.920951,
+            0.25957,
+            0.147931
+          ]
+        },
+        {
+          "class": "person",
+          "class_id": 0,
+          "bbox": [
+            167.19,
+            242.37,
+            763.53,
+            457.99
+          ],
+          "yolo": [
+            0.428869,
+            0.654678,
+            0.596506,
+            0.636095
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000061",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "74": {
+      "frame_id": 74,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000074.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "person",
+          "class_id": 0,
+          "bbox": [
+            406.79,
+            239.18,
+            501.56,
+            471.83
+          ],
+          "yolo": [
+            0.513727,
+            0.659856,
+            0.391847,
+            0.655325
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000074",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "75": {
+      "frame_id": 75,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000075.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "person",
+          "class_id": 0,
+          "bbox": [
+            401.83,
+            238.31,
+            497.63,
+            469.8
+          ],
+          "yolo": [
+            0.508316,
+            0.657236,
+            0.388773,
+            0.6525
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000075",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "76": {
+      "frame_id": 76,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000076.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "person",
+          "class_id": 0,
+          "bbox": [
+            385.49,
+            242.37,
+            509.02,
+            473.96
+          ],
+          "yolo": [
+            0.5,
+            0.665773,
+            0.397671,
+            0.658284
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000076",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "77": {
+      "frame_id": 77,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000077.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "red_target_area",
+          "class_id": 4,
+          "bbox": [
+            38.59,
+            548.4,
+            344.62,
+            166.36
+          ],
+          "yolo": [
+            0.164766,
+            0.877194,
+            0.269234,
+            0.231056
+          ]
+        },
+        {
+          "class": "yellow_target_area",
+          "class_id": 5,
+          "bbox": [
+            23.95,
+            548.4,
+            327.32,
+            162.37
+          ],
+          "yolo": [
+            0.14657,
+            0.874424,
+            0.255719,
+            0.225514
+          ]
+        },
+        {
+          "class": "person",
+          "class_id": 0,
+          "bbox": [
+            394.0,
+            244.0,
+            548.0,
+            476.0
+          ],
+          "yolo": [
+            0.521875,
+            0.669444,
+            0.428125,
+            0.661111
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000077",
+      "reviewed_at": "2026-09-28T20:03:50+00:00"
+    },
+    "9": {
+      "frame_id": 9,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000009.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            456.38,
+            517.79,
+            526.9,
+            200.96
+          ],
+          "yolo": [
+            0.56237,
+            0.858711,
+            0.411642,
+            0.279113
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000009",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "8": {
+      "frame_id": 8,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000008.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            468.36,
+            483.19,
+            529.56,
+            226.25
+          ],
+          "yolo": [
+            0.572765,
+            0.828212,
+            0.413721,
+            0.314233
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000008",
+      "reviewed_at": "2026-09-28T20:02:02+00:00"
+    },
+    "13": {
+      "frame_id": 13,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000013.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            461.7,
+            589.66,
+            493.64,
+            125.1
+          ],
+          "yolo": [
+            0.553534,
+            0.905846,
+            0.385655,
+            0.173752
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000013",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "22": {
+      "frame_id": 22,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000022.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "red_box",
+          "class_id": 2,
+          "bbox": [
+            369.9,
+            271.58,
+            283.41,
+            133.09
+          ],
+          "yolo": [
+            0.399688,
+            0.469616,
+            0.221414,
+            0.184843
+          ]
+        },
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            482.99,
+            612.28,
+            521.58,
+            105.14
+          ],
+          "yolo": [
+            0.581081,
+            0.923406,
+            0.407484,
+            0.146026
+          ]
+        },
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            528.23,
+            564.37,
+            436.42,
+            149.06
+          ],
+          "yolo": [
+            0.58316,
+            0.887361,
+            0.340956,
+            0.207024
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000022",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "47": {
+      "frame_id": 47,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000047.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "yellow_box",
+          "class_id": 3,
+          "bbox": [
+            558.84,
+            292.87,
+            206.24,
+            149.06
+          ],
+          "yolo": [
+            0.517152,
+            0.510282,
+            0.161123,
+            0.207024
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000047",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "67": {
+      "frame_id": 67,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000067.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            515.41,
+            658.82,
+            425.96,
+            59.64
+          ],
+          "yolo": [
+            0.569052,
+            0.956453,
+            0.332779,
+            0.08284
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000067",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "56": {
+      "frame_id": 56,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000056.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "yellow_box",
+          "class_id": 3,
+          "bbox": [
+            675.14,
+            272.2,
+            223.63,
+            178.93
+          ],
+          "yolo": [
+            0.614809,
+            0.502311,
+            0.174709,
+            0.248521
+          ]
+        },
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            509.02,
+            630.07,
+            436.61,
+            87.34
+          ],
+          "yolo": [
+            0.56822,
+            0.935743,
+            0.341098,
+            0.121302
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000056",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "58": {
+      "frame_id": 58,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000058.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            497.3,
+            631.13,
+            445.12,
+            83.08
+          ],
+          "yolo": [
+            0.562396,
+            0.934264,
+            0.347754,
+            0.115385
+          ]
+        },
+        {
+          "class": "yellow_box",
+          "class_id": 3,
+          "bbox": [
+            677.27,
+            259.42,
+            186.36,
+            162.96
+          ],
+          "yolo": [
+            0.601913,
+            0.473465,
+            0.145591,
+            0.226331
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000058",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "69": {
+      "frame_id": 69,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000069.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "person",
+          "class_id": 0,
+          "bbox": [
+            549.48,
+            247.7,
+            315.21,
+            338.7
+          ],
+          "yolo": [
+            0.552413,
+            0.579234,
+            0.246256,
+            0.470414
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000069",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "54": {
+      "frame_id": 54,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000054.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "yellow_box",
+          "class_id": 3,
+          "bbox": [
+            716.67,
+            293.5,
+            237.47,
+            148.05
+          ],
+          "yolo": [
+            0.652662,
+            0.510447,
+            0.185524,
+            0.205621
+          ]
+        },
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            502.63,
+            625.81,
+            452.58,
+            83.08
+          ],
+          "yolo": [
+            0.569468,
+            0.926868,
+            0.353577,
+            0.115385
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000054",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "59": {
+      "frame_id": 59,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000059.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            506.89,
+            624.74,
+            460.03,
+            91.6
+          ],
+          "yolo": [
+            0.575707,
+            0.931305,
+            0.359401,
+            0.127219
+          ]
+        },
+        {
+          "class": "yellow_box",
+          "class_id": 3,
+          "bbox": [
+            643.19,
+            257.29,
+            236.41,
+            208.76
+          ],
+          "yolo": [
+            0.594842,
+            0.502311,
+            0.184692,
+            0.289941
+          ]
+        },
+        {
+          "class": "yellow_target_area",
+          "class_id": 5,
+          "bbox": [
+            43.66,
+            611.96,
+            332.25,
+            105.44
+          ],
+          "yolo": [
+            0.163894,
+            0.923169,
+            0.259567,
+            0.14645
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000059",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    },
+    "11": {
+      "frame_id": 11,
+      "source": "dataset/raw/box_experiment/session_20260829_233703_6weu/frame_000011.jpg",
+      "activity": null,
+      "reviewed": true,
+      "empty": false,
+      "image_size": [
+        1280,
+        720
+      ],
+      "annotations": [
+        {
+          "class": "main_experiment_box",
+          "class_id": 1,
+          "bbox": [
+            450.45,
+            576.81,
+            516.47,
+            131.01
+          ],
+          "yolo": [
+            0.553661,
+            0.892104,
+            0.403494,
+            0.181953
+          ]
+        },
+        {
+          "class": "person",
+          "class_id": 0,
+          "bbox": [
+            436.61,
+            250.89,
+            487.72,
+            357.87
+          ],
+          "yolo": [
+            0.531614,
+            0.596986,
+            0.381032,
+            0.497041
+          ]
+        }
+      ],
+      "frame_key": "session_20260829_233703_6weu/000011",
+      "reviewed_at": "2026-09-28T20:02:58+00:00"
+    }
+  },
+  "activity": null,
+  "n_frames_annotated": 28
+}

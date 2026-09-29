@@ -1,0 +1,71 @@
+{
+  "schema": "astra-experiment-report/1",
+  "sessions": 11,
+  "source_frames": 845,
+  "annotated_frames": 28,
+  "empty_label_frames": 0,
+  "objects_per_class": {
+    "person": 17,
+    "main_experiment_box": 22,
+    "red_box": 3,
+    "yellow_box": 8,
+    "red_target_area": 3,
+    "yellow_target_area": 7
+  },
+  "sessions_per_class": {
+    "person": 1,
+    "main_experiment_box": 1,
+    "red_box": 1,
+    "yellow_box": 1,
+    "red_target_area": 1,
+    "yellow_target_area": 1
+  },
+  "proposed_objects": {
+    "person": 185,
+    "red_box": 495,
+    "yellow_box": 166
+  },
+  "frames_with_proposals": 186,
+  "frames_awaiting_human": 817,
+  "activity_sessions": {
+    "APPROACH": 1,
+    "OPEN_BOX": 1,
+    "PICK_RED": 1,
+    "PICK_YELLOW": 1,
+    "PLACE_RED": 1,
+    "PLACE_YELLOW": 2
+  },
+  "per_session": {
+    "session_20260829_233703_6weu": {
+      "activity": null,
+      "frames": 28,
+      "empty": 0,
+      "classes": {
+        "main_experiment_box": 22,
+        "person": 17,
+        "yellow_target_area": 7,
+        "red_box": 3,
+        "red_target_area": 3,
+        "yellow_box": 8
+      }
+    }
+  },
+  "vocabulary": [
+    "person",
+    "main_experiment_box",
+    "red_box",
+    "yellow_box",
+    "red_target_area",
+    "yellow_target_area"
+  ],
+  "proposable": [
+    "person",
+    "red_box",
+    "yellow_box"
+  ],
+  "manual_only": [
+    "main_experiment_box",
+    "red_target_area",
+    "yellow_target_area"
+  ]
+}

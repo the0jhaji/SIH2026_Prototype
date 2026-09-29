@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>ASTRA experiment annotation</title>
+<style>
+  :root { --bg:#14171c; --panel:#1d2128; --line:#2e343d; --fg:#e7ecf3; --muted:#93a0b1; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:14px/1.45 ui-sans-serif,system-ui,"Segoe UI",sans-serif; }
+  header { display:flex; gap:14px; align-items:center; padding:10px 14px;
+           background:var(--panel); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  h1 { font-size:15px; margin:0 12px 0 0; font-weight:650; }
+  .warn { color:#ffcf7a; font-size:12px; }
+  main { display:flex; gap:0; height:calc(100vh - 53px); }
+  #stage { flex:1; display:flex; align-items:center; justify-content:center;
+           padding:12px; overflow:hidden; position:relative; }
+  canvas { max-width:100%; max-height:100%; background:#000; cursor:crosshair; }
+  aside { width:310px; background:var(--panel); border-left:1px solid var(--line);
+          overflow:auto; padding:12px; }
+  .row { display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
+  select, button { background:#262c35; color:var(--fg); border:1px solid var(--line);
+                   border-radius:6px; padding:5px 9px; font:inherit; cursor:pointer; }
+  button:hover { background:#303845; }
+  button.primary { background:#2b6b3f; border-color:#3a8b52; }
+  button.primary:hover { background:#348049; }
+  .cls { display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:6px;
+         border:1px solid transparent; cursor:pointer; }
+  .cls.active { border-color:var(--fg); background:#2a313b; }
+  .sw { width:14px; height:14px; border-radius:3px; flex:none; }
+  .cls small { color:var(--muted); }
+  .key { display:inline-block; min-width:16px; text-align:center; padding:0 4px;
+         border:1px solid var(--line); border-radius:4px; background:#22272f; font-size:11px; }
+  .box { display:flex; align-items:center; gap:6px; padding:4px 6px; border-radius:6px;
+         border:1px solid var(--line); margin-bottom:5px; background:#232830; cursor:pointer; }
+  .box.sel { border-color:#7fd6ff; }
+  .box .src { color:var(--muted); font-size:11px; margin-left:auto; }
+  .box .prop { color:#ffcf7a; font-size:11px; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted);
+       margin:16px 0 7px; font-weight:650; }
+  table { width:100%; border-collapse:collapse; }
+  td, th { padding:3px 4px; text-align:left; border-bottom:1px solid var(--line); font-size:12px; }
+  th { color:var(--muted); font-weight:600; }
+  .muted { color:var(--muted); font-size:12px; }
+  #status { min-height:18px; }
+  a { color:#7fd6ff; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ASTRA &mdash; experiment detection annotation</h1>
+  <span class="warn">Dashed boxes are <b>proposals</b> (candidates), not answers. Nothing becomes a label until you save.</span>
+  <span class="row" style="margin:0">
+    <button id="save">Save <span class="key">S</span></button>
+    <button id="next">Next <span class="key">N</span></button>
+    <button id="prev">Prev <span class="key">P</span></button>
+  </span>
+  <span id="status" class="muted"></span>
+</header>
+<main>
+  <div id="stage"><canvas id="cv" width="1280" height="720"></canvas></div>
+  <aside>
+    <div class="row">
+      <select id="session"></select>
+      <button id="goto">Go</button>
+    </div>
+    <div class="row">
+      <button id="nextUnrev">Next unreviewed</button>
+      <label class="muted" id="reviewLabel"><input type="checkbox" id="reviewed" /> reviewed</label>
+    </div>
+    <h2>Frame</h2>
+    <div class="muted" id="frameInfo">no frame loaded</div>
+    <div class="row" style="margin-top:8px">
+      <button id="fit">Fit</button>
+      <button id="zoomIn">+</button>
+      <button id="zoomOut">&minus;</button>
+      <button id="delAll">Clear all</button>
+    </div>
+
+    <h2>Class <span class="key">1</span>&ndash;<span class="key">6</span></h2>
+    <div id="classes"></div>
+
+    <h2>Boxes</h2>
+    <div id="boxes"></div>
+    <div class="muted" style="margin-top:6px">
+      drag inside a box to move &middot; drag a corner/edge handle to resize &middot;
+      <span class="key">D</span> delete selected &middot; drag on empty canvas to draw a new box
+    </div>
+
+    <h2>Progress</h2>
+    <table><tbody id="progress"></tbody></table>
+    <h2>Dataset counts</h2>
+    <table><tbody id="counts"></tbody></table>
+  </aside>
+</main>
+
+<script>
+const S = {
+  cfg: null, session: null, frameId: null, size: [1280, 720],
+  boxes: [],          // confirmed/current: {class,bbox:[x,y,w,h],source,selected}
+  proposals: [],      // candidates, drawn dashed, not part of S.boxes
+  current: 0,         // class id for new boxes
+  zoom: 1, drag: null, img: null,
+};
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const $ = (id) => document.getElementById(id);
+
+const clsColor = (id) => {
+  const c = (S.cfg && S.cfg.classes.find(c => c.id === id)) || {color:[200,200,200]};
+  return `rgb(${c.color[0]},${c.color[1]},${c.color[2]})`;
+};
+const clsName = (id) => (S.cfg.classes.find(c => c.id === id) || {}).name || '?';
+
+function status(msg) { $('status').textContent = msg || ''; }
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+// ----------------------------------------------------------------- rendering
+function fitCanvas() {
+  const imgW = S.size[0], imgH = S.size[1];
+  const stage = $('stage').getBoundingClientRect();
+  const scale = Math.min((stage.width - 24) / imgW, (stage.height - 24) / imgH);
+  const k = scale * S.zoom;
+  cv.width = Math.round(imgW * k);
+  cv.height = Math.round(imgH * k);
+  cv.dataset.scale = k;
+}
+function k() { return Number(cv.dataset.scale || 1); }
+function toImage(ev) {
+  const r = cv.getBoundingClientRect();
+  return [(ev.clientX - r.left) * (S.size[0] / r.width), (ev.clientY - r.top) * (S.size[1] / r.height)];
+}
+
+function draw() {
+  const W = S.size[0], H = S.size[1];
+  ctx.setTransform(k(), 0, 0, k(), 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  if (S.img) ctx.drawImage(S.img, 0, 0, W, H);
+  ctx.lineWidth = 2 / k() * 2;
+  // proposals: dashed, clearly marked as candidates
+  ctx.setLineDash([8 / k() * 2, 6 / k() * 2]);
+  S.proposals.forEach(p => {
+    ctx.strokeStyle = clsColor(S.cfg.classes.find(c => c.name === p.class)?.id ?? 0);
+    ctx.strokeRect(p.bbox[0], p.bbox[1], p.bbox[2], p.bbox[3]);
+    tag(ctx, `${p.class} ?`, p.bbox[0], p.bbox[1], clsColor(S.cfg.classes.find(c => c.name === p.class)?.id ?? 0));
+  });
+  ctx.setLineDash([]);
+  S.boxes.forEach((b, i) => {
+    ctx.strokeStyle = clsColor(b.classId);
+    ctx.strokeRect(b.bbox[0], b.bbox[1], b.bbox[2], b.bbox[3]);
+    tag(ctx, `${i + 1} ${b.class}`, b.bbox[0], b.bbox[1], clsColor(b.classId));
+    if (b.selected) {
+      ctx.fillStyle = clsColor(b.classId) + '22';
+      ctx.fillRect(b.bbox[0], b.bbox[1], b.bbox[2], b.bbox[3]);
+    }
+  });
+  if (S.drag && S.drag.mode === 'new') {
+    ctx.strokeStyle = clsColor(S.current);
+    ctx.strokeRect(S.drag.x, S.drag.y, S.drag.w, S.drag.h);
+  }
+}
+function tag(c, text, x, y, color) {
+  c.font = `${Math.round(13)}px sans-serif`;
+  const w = c.measureText(text).width + 8;
+  c.fillStyle = 'rgba(0,0,0,.65)';
+  c.fillRect(x, y - 15, w, 15);
+  c.fillStyle = color;
+  c.fillText(text, x + 4, y - 4);
+}
+
+function renderClassList() {
+  $('classes').innerHTML = S.cfg.classes.map(c => `
+    <div class="cls ${c.id === S.current ? 'active' : ''}" data-id="${c.id}">
+      <span class="sw" style="background:${clsColor(c.id)}"></span>
+      <span>${c.id + 1}. ${c.name}</span>
+      ${c.proposable ? '' : '<small>manual</small>'}
+    </div>`).join('');
+  $('classes').querySelectorAll('.cls').forEach(el =>
+    el.onclick = () => { S.current = Number(el.dataset.id); renderClassList(); });
+}
+function renderBoxes() {
+  $('boxes').innerHTML = S.boxes.map((b, i) => `
+    <div class="box ${b.selected ? 'sel' : ''}" data-i="${i}">
+      <span class="sw" style="background:${clsColor(b.classId)}"></span>
+      <span>${b.class}</span>
+      ${b.source === 'proposal' ? '<span class="prop">accepted</span>' : ''}
+      <span class="src">${b.source}</span>
+    </div>`).join('') || '<div class="muted">no boxes yet</div>';
+  $('boxes').querySelectorAll('.box').forEach(el =>
+    el.onclick = () => { S.boxes.forEach(b => b.selected = false);
+                         S.boxes[Number(el.dataset.i)].selected = true; renderBoxes(); draw(); });
+}
+function renderProgress() {
+  const s = S.sessions.find(x => x.session_id === S.session);
+  $('frameInfo').innerHTML = S.frameId === null ? 'no frame loaded' :
+    `<b>${S.session}</b> &middot; frame #${S.frameId} &middot; ${S.size[0]}x${S.size[1]}
+     ${S.activity ? '&middot; <b>' + S.activity + '</b>' : ''}
+     ${s ? `&middot; session reviewed <b>${s.n_reviewed}</b>/${s.n_frames}` : ''}`;
+}
+function renderCounts(rep) {
+  const rows = [
+    ['source frames', rep.source_frames], ['sessions', rep.sessions],
+    ['reviewed frames', rep.annotated_frames], ['awaiting human', rep.frames_awaiting_human],
+    ['proposals (person)', rep.proposed_objects.person],
+    ['proposals (red)', rep.proposed_objects.red_box],
+    ['proposals (yellow)', rep.proposed_objects.yellow_box],
+  ];
+  $('counts').innerHTML = rows.map(([k, v]) => `<tr><td class="muted">${k}</td><td>${v}</td></tr>`).join('')
+    + Object.entries(rep.objects_per_class).map(([k, v]) =>
+        `<tr><td class="muted">${k}</td><td><b>${v}</b></td></tr>`).join('');
+  $('progress').innerHTML = S.sessions.map(s =>
+    `<tr><td class="muted">${s.activity || s.label}</td>
+      <td>${s.n_reviewed}/${s.n_sampled}</td><td>${s.n_remaining}</td></tr>`).join('');
+}
+
+// ------------------------------------------------------------------ mouse
+const HANDLE = 7;
+function hitTest(px, py) {
+  for (let i = S.boxes.length - 1; i >= 0; i--) {
+    const b = S.boxes[i].bbox;
+    const corners = [[b[0], b[1]], [b[0]+b[2], b[1]], [b[0], b[1]+b[3]], [b[0]+b[2], b[1]+b[3]],
+                     [b[0]+b[2]/2, b[1]], [b[0]+b[2]/2, b[1]+b[3]], [b[0], b[1]+b[3]/2], [b[0]+b[2], b[1]+b[3]/2]];
+    if (corners.some(([cx, cy]) => Math.abs(px - cx) * S.size[0] / cv.getBoundingClientRect().width < HANDLE &&
+                             Math.abs(py - cy) * S.size[1] / cv.getBoundingClientRect().height < HANDLE))
+      return {i, mode: 'resize'};
+    if (px >= b[0] && py >= b[1] && px <= b[0]+b[2] && py <= b[1]+b[3]) return {i, mode: 'move'};
+  }
+  return null;
+}
+cv.addEventListener('mousedown', ev => {
+  const [x, y] = toImage(ev);
+  const hit = hitTest(x, y);
+  if (hit) {
+    S.boxes.forEach(b => b.selected = false);
+    S.boxes[hit.i].selected = true;
+    const b = S.boxes[hit.i].bbox;
+    S.drag = {mode: hit.mode, i: hit.i, x, y, ox: b[0], oy: b[1], ow: b[2], oh: b[3]};
+    renderBoxes();
+  } else {
+    S.drag = {mode: 'new', x, y, w: 0, h: 0};
+  }
+  draw();
+});
+cv.addEventListener('mousemove', ev => {
+  if (!S.drag) return;
+  const [x, y] = toImage(ev);
+  const d = S.drag;
+  if (d.mode === 'new') { d.w = x - d.x; d.h = y - d.y; }
+  else {
+    const b = S.boxes[d.i].bbox;
+    if (d.mode === 'move') { b[0] = d.ox + (x - d.x); b[1] = d.oy + (y - d.y); }
+    else {
+      b[2] = Math.max(6, d.ow + (x - d.x)); b[3] = Math.max(6, d.oh + (y - d.y));
+      b[0] = d.ox; b[1] = d.oy;
+    }
+  }
+  draw();
+});
+window.addEventListener('mouseup', () => {
+  const d = S.drag;
+  if (!d) return;
+  if (d.mode === 'new') {
+    const w = Math.abs(d.w), h = Math.abs(d.h);
+    if (w > 8 && h > 8) {
+      S.boxes.push({class: S.cfg.classes[S.current].name, classId: S.current,
+                    bbox: [Math.min(d.x, d.x + d.w), Math.min(d.y, d.y + d.h), w, h], source: 'manual'});
+    }
+  } else {
+    S.boxes[d.i].bbox = S.boxes[d.i].bbox.map(v => Math.round(Math.max(2, v)));
+    S.boxes[d.i].source = S.boxes[d.i].source === 'proposal' ? 'proposal(edited)' : S.boxes[d.i].source;
+  }
+  S.drag = null; renderBoxes(); draw();
+});
+
+// ------------------------------------------------------------------ actions
+function addBox(clsId) {
+  S.current = clsId; renderClassList();
+  status(`new box: ${clsName(clsId)} — drag on the image`);
+}
+function acceptProposal(p) {
+  S.boxes.push({class: p.class, classId: S.cfg.classes.find(c => c.name === p.class).id,
+                bbox: p.bbox.slice(), source: 'proposal'});
+  S.proposals = S.proposals.filter(q => q !== p);
+  renderBoxes(); draw();
+}
+function deleteSelected() {
+  const i = S.boxes.findIndex(b => b.selected);
+  if (i < 0) return status('no box selected');
+  S.boxes.splice(i, 1); renderBoxes(); draw(); status('box deleted (not saved yet)');
+}
+function reclass(clsId) {
+  const b = S.boxes.find(x => x.selected);
+  if (!b) return status('no box selected');
+  b.class = clsName(clsId); b.classId = clsId;
+  if (b.source !== 'manual') b.source = 'proposal(reclass)';
+  renderBoxes(); draw();
+}
+
+async function loadFrame(frameId) {
+  const d = await api(`/api/frame/${S.session}/${frameId}`);
+  S.frameId = frameId; S.size = d.image_size; S.activity = d.activity;
+  S.proposals = d.proposals; setReviewBox(d.reviewed, false);
+  S.boxes = d.annotations.map(a => ({class: a.class, classId: a.class_id,
+                                    bbox: a.bbox.slice(), source: 'confirmed'}));
+  fitCanvas();
+  await new Promise(res => { S.img = new Image(); S.img.onload = res; S.img.src = d.image_url + '?t=' + Date.now(); });
+  renderProgress(); renderBoxes(); draw();
+  status('');
+}
+
+// Reflect the review flag and persist it immediately. Persisting on change (not
+// only on Save) is what stops the decision from being lost: the flag used to be
+// re-derived from the server on every navigation, so ticking it once and then
+// saving a run of frames silently stored reviewed=false for all of them.
+function setReviewBox(checked, persist) {
+  $('reviewed').checked = checked;
+  $('reviewLabel').style.color = checked ? '#9ae6a4' : '#ffcf7a';
+  $('reviewLabel').title = checked
+    ? 'This frame is marked reviewed and counts as a training row.'
+    : 'NOT reviewed: the labels are saved but excluded from training.';
+  if (persist && S.frameId !== null) {
+    api('/api/review', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({session_id: S.session, frame_id: S.frameId,
+                                              reviewed: checked})})
+      .then(r => { status(checked ? `frame ${S.frameId} marked reviewed` : `frame ${S.frameId} unmarked`); return refreshCounts(); })
+      .catch(e => status('could not save review state: ' + e.message));
+  }
+}
+$('reviewed').addEventListener('change', ev => setReviewBox(ev.target.checked, true));
+
+async function save() {
+  if (S.frameId === null) return status('no frame');
+  const body = {session_id: S.session, frame_id: S.frameId, reviewed: $('reviewed').checked,
+                image_size: S.size, boxes: S.boxes.map(b => ({class: b.class, bbox: b.bbox}))};
+  const r = await api('/api/save', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                     body: JSON.stringify(body)});
+  S.boxes.forEach(b => b.source = b.source === 'manual' ? 'manual' : 'proposal');
+  S.proposals = [];
+  await refreshCounts();
+  if (r.reviewed) {
+    status(`saved ${r.n_boxes} box(es) - frame ${S.frameId} REVIEWED${r.empty ? ' (empty/background)' : ''}`);
+  } else {
+    // Never claim plain success for an unreviewed frame: that is exactly the
+    // message that hid 28 finished annotations from the user.
+    status(`saved ${r.n_boxes} box(es), but frame ${S.frameId} is NOT reviewed - tick "reviewed" to include it`);
+  }
+  if (r.next && r.next.remaining > 0) await loadFrame(r.next.frame_id);
+  else status('session fully reviewed - pick the next session');
+}
+async function step(dir) {
+  // Walk the real frame ids for this session instead of frame_id +/- 1, so a
+  // session with gaps in its numbering cannot be navigated into a 404.
+  const s = S.sessions.find(x => x.session_id === S.session);
+  const ids = (s && s.frame_ids) || [];
+  const i = ids.indexOf(S.frameId);
+  const j = i < 0 ? (dir > 0 ? 0 : ids.length - 1) : i + dir;
+  if (j < 0 || j >= ids.length) return status('end of session');
+  await loadFrame(ids[j]);
+}
+async function nextUnreviewed() {
+  const r = await api(`/api/next/${S.session}`, {method: 'GET'});
+  if (r.reviewed) return status('nothing left unreviewed in this session');
+  await loadFrame(r.frame_id);
+}
+async function refreshCounts() {
+  const rep = await api('/api/stats');
+  S.sessions = (await api('/api/sessions')).sessions;
+  renderCounts(rep);
+}
+
+// -------------------------------------------------------------------- keys
+window.addEventListener('keydown', ev => {
+  if (ev.target.tagName === 'SELECT' || ev.target.tagName === 'INPUT') return;
+  const kk = ev.key.toLowerCase();
+  if (kk >= '1' && kk <= '6') return addBox(Number(kk) - 1);
+  if (kk === 'd') return deleteSelected();
+  if (kk === 'n') return step(1);
+  if (kk === 'p') return step(-1);
+  if (kk === 's') return save();
+  if (ev.key === 'Delete') return deleteSelected();
+  if (ev.key === 'Backspace') { ev.preventDefault(); return deleteSelected(); }
+});
+
+$('save').onclick = save;
+$('next').onclick = () => step(1);
+$('prev').onclick = () => step(-1);
+$('nextUnrev').onclick = nextUnreviewed;
+$('delAll').onclick = () => { S.boxes = []; renderBoxes(); draw(); };
+$('fit').onclick = () => { S.zoom = 1; fitCanvas(); draw(); };
+$('zoomIn').onclick = () => { S.zoom = Math.min(4, S.zoom * 1.25); fitCanvas(); draw(); };
+$('zoomOut').onclick = () => { S.zoom = Math.max(0.2, S.zoom / 1.25); fitCanvas(); draw(); };
+$('goto').onclick = async () => {
+  S.session = $('session').value;
+  const r = await api('/api/next/' + S.session);
+  await loadFrame(r.reviewed ? (S.sessions.find(s => s.session_id === S.session)?.n_sampled || 1) : r.frame_id);
+};
+// Accept a proposal by clicking its dashed rectangle (hit test on proposals)
+cv.addEventListener('dblclick', ev => {
+  const [x, y] = toImage(ev);
+  const p = S.proposals.find(q => x >= q.bbox[0] && y >= q.bbox[1] &&
+                                    x <= q.bbox[0]+q.bbox[2] && y <= q.bbox[1]+q.bbox[3]);
+  if (p) acceptProposal(p); else status('no proposal there — drag to draw one');
+});
+window.addEventListener('resize', () => { fitCanvas(); draw(); });
+
+(async function boot() {
+  S.cfg = await api('/api/config');
+  renderClassList();
+  const data = await api('/api/sessions');
+  S.sessions = data.sessions;
+  $('session').innerHTML = S.sessions.map(s =>
+    `<option value="${s.session_id}">${s.activity || s.label} — ${s.session_id} (${s.n_reviewed}/${s.n_sampled})</option>`).join('');
+  const want = new URLSearchParams(location.search).get('session');
+  if (want) $('session').value = want;
+  S.session = $('session').value;
+  await refreshCounts();
+  const r = await api('/api/next/' + S.session);
+  await loadFrame(r.reviewed ? 1 : r.frame_id);
+})();
+</script>
+</body>
+</html>

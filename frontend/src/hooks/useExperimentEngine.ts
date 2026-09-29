@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ExperimentMode } from './useExperiment'
+import type { VoiceStatus } from '../domain/voice'
 
 export interface EngineStep {
   step_id: string
@@ -43,7 +44,11 @@ export interface EngineSnapshot {
   last_activity: { step_id: string; activity: string; label: string; confidence: number } | null
   last_alert: Violation | null
   last_event: { kind: string; [key: string]: unknown } | null
-  voice: { health: string; queue_size: number }
+  /**
+   * The voice worker's own lifecycle. Deliberately NOT the experiment's
+   * `status`: a RUNNING run with an ERROR voice is a real, displayable state.
+   */
+  voice: VoiceStatus
 }
 
 const POLL_MS = 1000

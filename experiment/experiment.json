@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "id": "bas-box-handling-01",
   "name": "BAS Box Handling Experiment",
   "prototype": true,
@@ -27,62 +27,100 @@
     "PLACE_YELLOW",
     "COMPLETE"
   ],
+  "evidenceKinds": ["PRESENT", "MOVED", "PLACED"],
+  "evidenceNotes": {
+    "PRESENT": "the class was detected this run (arrival edge, not a per-frame latch)",
+    "MOVED": "the tracked class was displaced over consecutive frames (one episode per physical motion)",
+    "PLACED": "the tracked class came to rest inside the target area after a confirmed motion (one episode per placement)",
+    "KNOWN_LIMITS": "APPROACH is presence only - it does not prove proximity to the box. OPEN_BOX is grounded on the first MOTION OF A STORED BOX (red or yellow) because no container or lid detector exists in any shipped model; opening the box jiggling its contents is credited as that move, and it is a genuine inference, not a measurement. HAND_NEAR_* is unavailable (no hand-landmark model installed), so a PICK is proven by object motion only - 'held by the astronaut' is not verified. Because OPEN_BOX consumes the first content-move episode, PICK_RED/PICK_YELLOW each require a NEW, separate motion episode. PLACE_* additionally needs a target area, and NO shipped detector can see one (the custom model knows only red/yellow, yolov8n is COCO, the heuristic sees person/red/yellow): the destination is fixed station hardware, so its region is supplied by the ACTIVITY_TARGET_AREA config (x1,y1,x2,y2 normalized 0-1) rather than perceived. With that unset the run is honest about it - status reports targetAreaSource=none and placedGrounded=false, and PLACED is never claimed."
+  },
   "steps": [
     {
       "id": "step1",
       "order": 1,
       "activity": "APPROACH",
       "label": "Astronaut approaches the experiment area",
+      "voiceInstruction": "approach the experiment area",
       "description": "The astronaut enters the experiment area and is detected near the setup.",
-      "expectedObjects": ["person"]
+      "action": null,
+      "object": null,
+      "expectedObjects": ["person"],
+      "expectedEvents": [{ "event": "PRESENT", "object": "person" }]
     },
     {
       "id": "step2",
       "order": 2,
       "activity": "OPEN_BOX",
       "label": "Astronaut opens the main experiment box",
+      "voiceInstruction": "open the main experiment box",
       "description": "The main experiment box is opened so the red and yellow boxes inside become reachable.",
-      "expectedObjects": ["experiment_box"]
+      "action": "OPEN",
+      "object": "MAIN_BOX",
+      "expectedObjects": ["experiment_box"],
+      "expectedEvents": [{ "event": "MOVED", "object": ["red_box", "yellow_box"] }]
     },
     {
       "id": "step3",
       "order": 3,
       "activity": "PICK_RED",
       "label": "Astronaut picks up the red box",
+      "voiceInstruction": "pick up the red box",
       "description": "The red box is lifted out of the main experiment box.",
-      "expectedObjects": ["red_box"]
+      "action": "PICK",
+      "object": "RED_BOX",
+      "expectedObjects": ["red_box"],
+      "expectedEvents": [{ "event": "MOVED", "object": "red_box" }]
     },
     {
       "id": "step4",
       "order": 4,
       "activity": "PLACE_RED",
       "label": "Astronaut places the red box into the designated target area",
+      "voiceInstruction": "place the red box into the target area",
       "description": "The red box is placed inside the target area.",
-      "expectedObjects": ["red_box", "target_area"]
+      "action": "PLACE",
+      "object": "RED_BOX",
+      "expectedObjects": ["red_box", "target_area"],
+      "expectedEvents": [{ "event": "PLACED", "object": "red_box" }]
     },
     {
       "id": "step5",
       "order": 5,
       "activity": "PICK_YELLOW",
       "label": "Astronaut picks up the yellow box",
+      "voiceInstruction": "pick up the yellow box",
       "description": "The yellow box is lifted out of the main experiment box.",
-      "expectedObjects": ["yellow_box"]
+      "action": "PICK",
+      "object": "YELLOW_BOX",
+      "expectedObjects": ["yellow_box"],
+      "expectedEvents": [{ "event": "MOVED", "object": "yellow_box" }]
     },
     {
       "id": "step6",
       "order": 6,
       "activity": "PLACE_YELLOW",
       "label": "Astronaut places the yellow box into the designated target area",
+      "voiceInstruction": "place the yellow box into the target area",
       "description": "The yellow box is placed inside the target area.",
-      "expectedObjects": ["yellow_box", "target_area"]
+      "action": "PLACE",
+      "object": "YELLOW_BOX",
+      "expectedObjects": ["yellow_box", "target_area"],
+      "expectedEvents": [{ "event": "PLACED", "object": "yellow_box" }]
     },
     {
       "id": "step7",
       "order": 7,
       "activity": "COMPLETE",
       "label": "Both boxes are correctly placed and the experiment is complete",
+      "voiceInstruction": "confirm both boxes are in the target area",
       "description": "Both the red and yellow box are inside the target area. Terminal step - the experiment finishes.",
+      "action": null,
+      "object": null,
       "expectedObjects": ["red_box", "yellow_box", "target_area"],
+      "expectedEvents": [
+        { "event": "PLACED", "object": "red_box", "fresh": false },
+        { "event": "PLACED", "object": "yellow_box", "fresh": false }
+      ],
       "terminal": true
     }
   ],
@@ -91,13 +129,25 @@
     "advanceOnMatch": true,
     "stayOnStepOnError": true,
     "nextExpectedOnError": "unchanged - the offending step must be performed again to advance",
-    "skippedStepEvidence": "SKIPPED_STEP is advisory and is only emitted together with OUT_OF_SEQUENCE; progress advances exclusively on STEP_MATCHED",
+    "skippedStepEvidence": "SKIPPED_STEP is advisory and is emitted together with OUT_OF_SEQUENCE / WRONG_OBJECT / WRONG_SEQUENCE; progress advances exclusively on STEP_MATCHED",
+    "recourseRefinement": "a later-than-expected detection is refined to WRONG_OBJECT when the expected and observed steps share an action but differ in object (e.g. PICK_RED expected, PICK_YELLOW observed) and to WRONG_SEQUENCE when they share an object but differ in action (e.g. PLACE_RED before PICK_RED); steps without action/object metadata always stay OUT_OF_SEQUENCE",
     "lowConfidenceThreshold": 0.5,
     "terminalSteps": ["COMPLETE"],
-    "canonicalResultLabels": ["CORRECT", "OUT_OF_SEQUENCE", "SKIPPED", "REPEATED", "UNKNOWN", "LOW_CONFIDENCE"],
+    "canonicalResultLabels": [
+      "CORRECT",
+      "OUT_OF_SEQUENCE",
+      "WRONG_OBJECT",
+      "WRONG_SEQUENCE",
+      "SKIPPED",
+      "REPEATED",
+      "UNKNOWN",
+      "LOW_CONFIDENCE"
+    ],
     "canonicalEventKinds": [
       "STEP_MATCHED",
       "OUT_OF_SEQUENCE",
+      "WRONG_OBJECT",
+      "WRONG_SEQUENCE",
       "SKIPPED_STEP",
       "REPEATED_STEP",
       "UNKNOWN_ACTIVITY",
@@ -120,14 +170,28 @@
     {
       "code": "OUT_OF_SEQUENCE",
       "kind": "OUT_OF_SEQUENCE",
-      "when": "known activity from a later step is detected before the expected step",
+      "when": "known activity from a later step is detected before the expected step, with no shared action or object to refine it",
+      "advance": false,
+      "progressEffect": "none - expected step stays"
+    },
+    {
+      "code": "WRONG_OBJECT",
+      "kind": "WRONG_OBJECT",
+      "when": "the same action is performed on a different object than the expected step requires (e.g. PICK_YELLOW while PICK_RED is expected)",
+      "advance": false,
+      "progressEffect": "none - expected step stays"
+    },
+    {
+      "code": "WRONG_SEQUENCE",
+      "kind": "WRONG_SEQUENCE",
+      "when": "the expected object is acted on with the wrong action (e.g. PLACE_RED before the red box was picked up)",
       "advance": false,
       "progressEffect": "none - expected step stays"
     },
     {
       "code": "SKIPPED",
       "kind": "SKIPPED_STEP",
-      "when": "advisory emitted together with OUT_OF_SEQUENCE (a later step implies earlier steps were skipped)",
+      "when": "advisory emitted together with OUT_OF_SEQUENCE / WRONG_OBJECT / WRONG_SEQUENCE (a later step implies earlier steps were skipped)",
       "advance": false,
       "progressEffect": "none"
     },
@@ -156,7 +220,7 @@
   "example": {
     "expected": "PICK_RED",
     "observed": "PICK_YELLOW",
-    "result": "OUT_OF_SEQUENCE",
+    "result": "WRONG_OBJECT",
     "nextExpected": "PICK_RED",
     "note": "The expected step does not change when a later step fires out of order; the operator (or voice cue) re-prompts for the expected step."
   }

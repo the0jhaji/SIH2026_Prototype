@@ -250,6 +250,34 @@ server, no new dependencies, independent of the BAS runtime):
 
 Classes are config data in `dataset/annotation/classes.json`.
 
+### Which procedure step is this frame? (procedure ground truth)
+
+The YOLO labels above say *what is in the frame*. Nothing said *which procedure
+step the frame belongs to*, so the training data had no step label at all. This
+tool adds it, derived from the canonical `experiment/experiment.json` so it
+cannot drift from the sequence the app enforces:
+
+```powershell
+# one session, with its YOLO labels as the per-frame class source
+.\.venv\Scripts\python.exe dataset\scripts\annotate_procedure.py `
+  --session dataset\raw\box_experiment\session_20260829_235407_o3s3 `
+  --labels  dataset\annotations\box_experiment\session_20260829_235407_o3s3
+
+# or every recorded session
+.\.venv\Scripts\python.exe dataset\scripts\annotate_procedure.py --root dataset --all
+```
+
+It writes `procedure_labels.csv` next to the session. Read the limits:
+
+- The label is **visibility-derived** from `expectedObjects`. It is **not**
+  proof that an action happened — one frame cannot show motion or settling, so
+  `expectedEvents` is deliberately unused here.
+- A step that requires no objects is never claimed, unmatched frames get `-`
+  rather than a guess, and the label never moves backwards.
+- It exits **2** with an explanation when nothing could be labelled, so an empty
+  run never looks like a successful one. Steps needing `experiment_box` or
+  `target_area` cannot be labelled yet: no detector can see either.
+
 **Testing the stream** (backend running):
 
 ```bash
@@ -405,20 +433,35 @@ Full architecture, tests and migration notes: `docs/SAFETY_SYSTEM.md`.
 
 1. Press **Start experiment** (Source: `Backend · FastAPI`).
 2. `POST /api/experiment/start` launches the configured perception source:
-   - **live** (default, `ACTIVITY_BACKEND=live`):
-     `LiveActivityPerception` (`backend/app/activity_perception.py`) — the
-     **camera-grounded** source. It watches the object-detection service
+   - **interaction** (default, `ACTIVITY_BACKEND=interaction`):
+     `InteractionActivityPerception` (`backend/app/interaction_perception.py`) —
+     the **event-grounded** source. Visibility is not an action: a box in frame
+     proves nothing about a pick or a place. It runs the real
+     `ai.pipeline.interaction.InteractionTracker` and emits a step only when the
+     step's `expectedEvents` (`PRESENT` / `MOVED` / `PLACED`) are satisfied by
+     counted motion/placement episodes. Camera off or no fresh inference ->
+     it waits, honestly.
+     - Set `ACTIVITY_TARGET_AREA=x1,y1,x2,y2` (normalized 0-1) to declare the
+       destination fixture: no shipped detector can see it. Unset, the run
+       reports `placedGrounded: false` and `PLACED` is never claimed.
+     - No hand-landmark model is installed, so a PICK is proven by object
+       motion, never by "held by the astronaut".
+   - **live** (`ACTIVITY_BACKEND=live`):
+     `LiveActivityPerception` (`backend/app/activity_perception.py`) — the older
+     **presence-only** source. It watches the object-detection service
      (`GET /api/detections`) and emits a step only when the currently expected
      step's `expectedObjects` are all visible on a fresh frame (Detectors:
      `mock` for demos, `heuristic` for model-free real color/motion, `yolo`
      once your model is trained). Camera off or no fresh frame -> it waits,
-     honestly. The experiment never completes out of thin air.
+     honestly. The experiment never completes out of thin air. It cannot tell a
+     pick from a pass-by, and it is silent about repeats/out-of-sequence.
    - **mock-activity** (`ACTIVITY_BACKEND=mock`): `MockActivityPerception` —
      a deterministic feed **derived from the loaded experiment definition
      itself** (`experiment/experiment.json`): the correct steps plus a fixed
      rotation of planted mistakes so a run exercises every outcome:
      - correct steps (`STEP_MATCHED`)
-     - out-of-sequence step (picks a later step early)
+     - out-of-sequence step (picks a later step early) — refined to
+       `WRONG_OBJECT` / `WRONG_SEQUENCE` where the step metadata allows it
      - skipped-step advisory
      - repeated step
      - unknown activity

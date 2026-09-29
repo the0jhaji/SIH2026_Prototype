@@ -1,0 +1,25 @@
+{
+  "schema": "astra-experiment-detection/1",
+  "classes": [
+    "person",
+    "main_experiment_box",
+    "red_box",
+    "yellow_box",
+    "red_target_area",
+    "yellow_target_area"
+  ],
+  "class_notes": {
+    "person": "The astronaut. COCO 'person' is a reliable proposal source; confirm/edit by hand.",
+    "main_experiment_box": "The large container the red/yellow boxes start inside. NOT auto-proposed (section 6): no reliable visual heuristic is known yet.",
+    "red_box": "The small red box. A saturated-red HSV heuristic proposes candidates, but it also fires on skin and clothing, so every box needs human confirmation.",
+    "yellow_box": "The small yellow box. Same caveat as red_box: a saturated-yellow HSV heuristic proposes candidates only.",
+    "red_target_area": "Where the red box must end up. NOT auto-proposed (section 6). It is a placement REGION, so a drawn box is an operator judgement about the acceptable landing area, not a detected object.",
+    "yellow_target_area": "Where the yellow box must end up. NOT auto-proposed (section 6)."
+  },
+  "excluded_classes": {
+    "opened_box": "A state, not an object. Derived temporally from main_experiment_box + content motion later.",
+    "held_red_box": "A state. Derived from hand overlap + object motion; putting it in the detector would force the model to guess action from a single frame.",
+    "held_yellow_box": "A state, same reasoning as held_red_box.",
+    "PICK_RED / PLACE_RED / PICK_YELLOW / PLACE_YELLOW": "Actions. Never YOLO classes (section 5): the model answers WHAT is visible and WHERE, temporal logic answers WHAT is happening."
+  }
+}

@@ -699,6 +699,9 @@ function classificationResultColor(result: string): string {
     case 'OUT_OF_SEQUENCE':
     case 'SKIPPED':
       return '#f97316'
+    case 'WRONG_OBJECT':
+    case 'WRONG_SEQUENCE':
+      return '#ef4444'
     case 'REPEATED':
       return '#facc15'
     default:

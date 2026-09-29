@@ -8,9 +8,11 @@
 # Detection runs the general COCO ONNX and the custom experiment ONNX, merging
 # them with cross-model NMS. Override the two independent slots with
 # DETECTION_GENERAL_MODEL_PATH and DETECTION_CUSTOM_MODEL_PATH (paths are
-# relative to models/ unless absolute). Activity perception (ACTIVITY_BACKEND=
-# live) advances the experiment only when the required objects are visibly
-# present on camera.
+# relative to models/ unless absolute). Activity perception
+# (ACTIVITY_BACKEND=interaction, the default) advances the experiment only when
+# the interaction tracker sees real motion/placement evidence; the destination
+# region comes from ACTIVITY_TARGET_AREA (x1,y1,x2,y2 normalized 0-1) because no
+# shipped detector can see it.
 #
 # Shutdown: press Ctrl+C in this window (or close it) and the child backend/
 # frontend processes are terminated so nothing is left running.
@@ -158,7 +160,11 @@ try {
     $env:DETECTION_CONF_THRESHOLD = '0.25'
     $env:DETECTION_CV_THREADS = '8'
     $env:DETECTION_FPS = '8'
-    $env:ACTIVITY_BACKEND = 'live'
+    $env:ACTIVITY_BACKEND = 'interaction'
+    # The destination is fixed station hardware, not something a model can see,
+    # so it is configured (x1,y1,x2,y2 normalized 0-1). Without it the run
+    # reports placedGrounded=false and PLACE_* is unreachable.
+    $env:ACTIVITY_TARGET_AREA = '0.55,0.42,0.86,0.91'
     $backend = Start-Process -FilePath $BackendPy `
         -ArgumentList '-m','uvicorn','app.main:app','--host','0.0.0.0','--port',"$BackendPort" `
         -WorkingDirectory (Join-Path $Root 'backend') `
@@ -237,6 +243,19 @@ try {
                 Write-Err "    ^ This model cannot detect a person. Set DETECTION_BACKEND=yolo for the general model."
             }
             Write-Host ""
+            try {
+                $per = Invoke-RestMethod "$BackendUrl/api/experiment/perception" -TimeoutSec 5
+                $targetNote = if ($per.placedGrounded) { $per.targetAreaSource } else { 'NOT CONFIGURED - PLACE_* unreachable' }
+                Write-Host "  [PROCEDURE PERCEPTION]" -ForegroundColor Cyan
+                Write-Host "    source          = $($per.name) (event/motion grounded)"
+                Write-Host "    tracked classes = $($per.trackedClasses -join ', ')"
+                Write-Host "    target area     = $targetNote"
+                Write-Host "    evidence        = $($per.facts.PSObject.Properties.Count) object(s) with observed evidence"
+                if (-not $per.placedGrounded) {
+                    Write-Err "    ^ Set ACTIVITY_TARGET_AREA (x1,y1,x2,y2 in 0-1) so a set-down object can be grounded."
+                }
+                Write-Host ""
+            } catch { Write-Err "  perception status unavailable: $($_.Exception.Message)" }
         } catch { Write-Err "  detection status unavailable: $($_.Exception.Message)" }
     } else {
         Write-Err "Backend did not become ready on $BackendUrl within timeout."

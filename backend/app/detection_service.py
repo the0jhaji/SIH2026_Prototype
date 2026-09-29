@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from .detection_readiness import class_counts, model_readiness, partition_detections
 from .detection_tracker import TemporalTracker
 from ai.detection import detect_log
 
@@ -68,6 +69,29 @@ def _clamp_box(payload: dict, frame_w: int, frame_h: int) -> dict:
 def _payloads(detections, frame_w: int, frame_h: int) -> list[dict]:
     """Serialize detections to API payloads, clamped to the detection frame."""
     return [_clamp_box(d.to_dict(), frame_w, frame_h) for d in detections]
+
+
+def _model_type(det_status) -> str:
+    """Human-facing model role, derived from the class list it can emit.
+
+    Never from the filename: `experiment_custom.onnx` with two classes is a
+    narrow specialist whatever it is called, and calling it an "experiment
+    model" in the UI is what makes an empty detection panel look like a bug
+    instead of an honest training gap.
+    """
+    if det_status is None:
+        return "unknown"
+    classes = list(det_status.classes or ())
+    if not det_status.model_loaded:
+        return "not_loaded"
+    if not classes:
+        return "unknown"
+    readiness = model_readiness(classes)
+    if readiness["ready"]:
+        return "experiment"
+    if det_status.general_purpose:
+        return "general"
+    return "narrow"
 
 
 class DetectionService:
@@ -597,6 +621,7 @@ class DetectionService:
                 "detector": None,
                 "modelLoaded": False,
                 "modelPath": None,
+                "modelType": "none",
                 "modelSizeMb": None,
                 "classCount": None,
                 "generalPurpose": None,
@@ -613,6 +638,11 @@ class DetectionService:
                 "unknownCount": 0,
                 "unknownDetections": [],
                 "rawUnknownDetections": [],
+                "perClass": {},
+                "rawPerClass": {},
+                "experimentDetectionCount": 0,
+                "genericDetectionCount": 0,
+                "experimentModel": model_readiness(None),
                 "inferenceMs": None,
                 "error": None,
                 **self._rate_payload(),
@@ -621,19 +651,23 @@ class DetectionService:
         with self._lock:
             last_inf = self._last_inference_ms
             error = self._last_error
-            count = len(self._detections)
-            raw_count = len(self._raw_detections)
+            dets = list(self._detections)
+            raw = list(self._raw_detections)
             unknown_count = len(self._unknown_detections)
             unknown = list(self._unknown_detections)
             raw_unknown = list(self._raw_unknown_detections)
             rates = self._rate_payload()
         det_status = det.status() if det is not None else None
         classes = list(det_status.classes) if det_status else None
+        split = partition_detections(dets)
         return {
             "enabled": True,
             "detector": det_status.detector_type if det_status else self._kind,
             "modelLoaded": bool(det_status and det_status.model_loaded),
             "modelPath": det_status.model_path if det_status else None,
+            # What kind of model this is, derived from the loaded class list —
+            # not from the filename, which is free to lie.
+            "modelType": _model_type(det_status),
             "modelSizeMb": round(det_status.model_size_mb, 2) if det_status and det_status.model_size_mb else None,
             "classCount": len(classes) if classes is not None else None,
             "generalPurpose": det_status.general_purpose if det_status else None,
@@ -646,11 +680,19 @@ class DetectionService:
             "inferenceStatus": "error" if error else ("ok" if last_inf is not None else "idle"),
             "lastInference": last_inf,
             "inferenceMs": self._inference_ms,
-            "detectionCount": count,
-            "rawDetectionCount": raw_count,
+            "detectionCount": len(dets),
+            "rawDetectionCount": len(raw),
             "unknownCount": unknown_count,
             "unknownDetections": unknown,
             "rawUnknownDetections": raw_unknown,
+            "perClass": class_counts(dets),
+            "rawPerClass": class_counts(raw),
+            "experimentDetectionCount": len(split["experiment"]),
+            "genericDetectionCount": len(split["generic"]),
+            # The honest headline: can this model see the experiment objects at
+            # all? Absent vocabulary coverage is a training gap, not a camera or
+            # confidence-threshold problem, and the UI must be able to say so.
+            "experimentModel": model_readiness(classes),
             "error": error,
             **rates,
         }
@@ -685,6 +727,7 @@ class DetectionService:
             error = self._last_error
             rates = self._rate_payload()
         frame_size, frame_source = self._resolve_frame_size(frame_size)
+        split = partition_detections(dets)
         return {
             "enabled": self._enabled,
             "frameWidth": frame_size[0] if frame_size else None,
@@ -697,6 +740,15 @@ class DetectionService:
             "rawDetections": raw,
             "unknownDetections": unknown,
             "rawUnknownDetections": raw_unknown,
+            # Experiment-vocabulary objects only. Empty here with a healthy
+            # camera means the model cannot see the experiment classes, which is
+            # a different problem from "nothing is in frame".
+            "experimentDetections": split["experiment"],
+            # COCO/other objects the general model *can* see. Kept separate so
+            # a `book` is never displayed as if it were an experiment box.
+            "genericDetections": split["generic"],
+            "perClass": class_counts(dets),
+            "rawPerClass": class_counts(raw),
             "lastInferenceMs": last_inf,
             "inferenceMs": inference_ms,
             "inferenceStatus": "error" if error else ("ok" if last_inf is not None else "idle"),

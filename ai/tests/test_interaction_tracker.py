@@ -274,3 +274,44 @@ def test_yellow_events_parallel_red() -> None:
     assert "YELLOW_MOVED" in seq
     assert "YELLOW_PLACED" in seq
     assert "HAND_NEAR_YELLOW" in seq
+
+
+def test_custom_class_prefixes_extend_the_vocabulary() -> None:
+    """A custom prefix map lets a procedure track classes beyond red/yellow.
+
+    The map also *defines* what the tracker reasons about, so a class left out
+    of it is never tracked and can never produce an event.
+    """
+    tracker = InteractionTracker(
+        InteractionConfig(class_prefixes={"experiment_box": "EXPERIMENT", "red_box": "RED"})
+    )
+    assert tracker.supported_classes == ("experiment_box", "red_box")
+
+    # Same motion profile as the yellow test: no single hop may exceed
+    # max_assoc_distance * frame_diag, or the track is dropped and re-seeded
+    # instead of followed.
+    steps = [
+        Box(400, 100, 80, 60),
+        Box(440, 120, 80, 60),
+        Box(470, 200, 80, 60),
+        Box(400, 375, 80, 60),
+        Box(400, 375, 80, 60),
+        Box(400, 375, 80, 60),
+        Box(400, 375, 80, 60),
+    ]
+    out = []
+    for i, box in enumerate(steps):
+        out += tracker.update(
+            [_det("experiment_box", box), _red(RED), _det("yellow_box", box), _target()],
+            [_hand_near(box)],
+            FRAME,
+            i,
+        )
+    seq = names(out)
+    assert "EXPERIMENT_MOVED" in seq
+    assert "EXPERIMENT_PLACED" in seq
+    assert "HAND_NEAR_EXPERIMENT" in seq
+    # The map also filters: red_box is listed so it is still tracked, while
+    # yellow_box was fed on every frame but is simply not part of this run.
+    assert {t.class_name for t in tracker.object_tracks} == {"experiment_box", "red_box"}
+    assert not [n for n in seq if n.startswith("YELLOW")]

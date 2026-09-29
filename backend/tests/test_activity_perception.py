@@ -135,8 +135,14 @@ def test_canonical_mock_run_e2e(monkeypatch) -> None:
         assert final["recording"] is False
         assert [s["activity"] for s in final["experiment"]["steps"]] == CANONICAL_ACTIVITIES
         # Every classification outcome fires exactly once per planted mistake.
+        # The two planted later-step detections are generic: one crosses from
+        # OPEN to PICK (both action and object change) and the other lands on
+        # COMPLETE, which carries no action/object at all — neither is
+        # refinable, so the specific counters stay empty for this plan.
         assert final["errors"] == {
             "outOfSequence": 2,
+            "wrongObject": 0,
+            "wrongSequence": 0,
             "skipped": 2,
             "repeated": 2,
             "unknown": 1,

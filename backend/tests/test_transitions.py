@@ -130,22 +130,55 @@ def test_repeated_completed_step(exp, done: int) -> None:
     assert s.errors["repeated"] == 1
 
 
+#: What stepping one step too far is called, per position. The two steps share
+#: an object (``MAIN_BOX`` at 0->1, ``RED_BOX`` at 2->3, ``YELLOW_BOX`` at 4->5)
+#: and disagree on the action, so the refusal is specific: WRONG_SEQUENCE. The
+#: two crossings that change both action and object (1->2, 3->4) have nothing
+#: to be specific about and stay OUT_OF_SEQUENCE.
+LATER_STEP_RECOURSE = {
+    0: "WRONG_SEQUENCE",
+    1: "OUT_OF_SEQUENCE",
+    2: "WRONG_SEQUENCE",
+    3: "OUT_OF_SEQUENCE",
+    4: "WRONG_SEQUENCE",
+}
+
+COUNTER_FOR = {
+    "WRONG_OBJECT": "wrongObject",
+    "WRONG_SEQUENCE": "wrongSequence",
+    "OUT_OF_SEQUENCE": "outOfSequence",
+}
+
+
 @pytest.mark.parametrize("done", list(range(5)))
 def test_out_of_sequence_also_skips(exp, done: int) -> None:
     s = session_at(exp, done)
     future = exp.steps[done + 1]
+    kind = LATER_STEP_RECOURSE[done]
     events = detect(s, future.activity)
-    assert [e.kind for e in events] == ["OUT_OF_SEQUENCE", "SKIPPED_STEP"]
+    assert [e.kind for e in events] == [kind, "SKIPPED_STEP"]
     primary, advisory = events
-    assert primary.result == "OUT_OF_SEQUENCE"
+    assert primary.result == kind
+    assert primary.severity == "error"
     assert primary.activity == future.activity
     assert primary.expected == exp.steps[done].activity
     assert advisory.result == "SKIPPED"
     assert advisory.step_id == exp.steps[done].id
     assert s.last_classification is primary
-    assert s.errors["outOfSequence"] == 1
+    assert s.errors[COUNTER_FOR[kind]] == 1
     assert s.errors["skipped"] == 1
     assert s.current_step_index == done
+
+
+def test_wrong_object_is_named_for_the_operator(exp) -> None:
+    """Picking the yellow box while the red box is due names both objects."""
+    s = session_at(exp, 2)  # PICK_RED_BOX is expected
+    events = detect(s, exp.steps[4].activity)  # PICK_YELLOW_BOX instead
+    primary = events[0]
+    assert primary.kind == "WRONG_OBJECT"
+    assert primary.voice == "Warning. The red box is expected, not the yellow box."
+    assert s.errors["wrongObject"] == 1
+    assert s.current_step_index == 2
 
 
 @pytest.mark.parametrize("done", list(range(5)))

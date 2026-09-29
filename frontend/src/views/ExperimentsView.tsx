@@ -5,6 +5,7 @@ import { LiveFeed } from '../components/LiveFeed'
 import { CameraStage } from '../components/CameraStage'
 import { useCamera } from '../hooks/cameraController'
 import { hazardLevelsFrom, resolveFrameSize, unattendedIdsFrom } from '../domain/detection'
+import { VOICE_READY, voiceState, voiceStateDetail, voiceStateLabel, voiceStateTone } from '../domain/voice'
 import { Badge, Empty, EmptyState, KeyValue, MetricCard, Panel, StatTile, SubCard } from './ui'
 import { PageShell, Timeline } from './layout'
 import { basEventEntries, severityColor } from './helpers'
@@ -28,6 +29,8 @@ const ACTION_LABEL: Record<string, string> = {
 const RESULT_TONE: Record<string, string> = {
   CORRECT: '#22c55e',
   OUT_OF_SEQUENCE: '#f97316',
+  WRONG_OBJECT: '#ef4444',
+  WRONG_SEQUENCE: '#ef4444',
   SKIPPED: '#facc15',
   REPEATED: '#facc15',
   UNKNOWN: '#64748b',
@@ -64,6 +67,9 @@ const RESULT_TONE: Record<string, string> = {
     onEngineStop,
   }: Props) {
     const running = state.status === 'RUNNING'
+    // The engine's own lifecycle. `running` above is the v1 local session; the
+    // two used to gate the same button, which made one control the other.
+    const engineRunning = engine?.status === 'RUNNING'
     const expected = expectedStep(state.experiment, state.currentStepIndex)
     const total = state.experiment.steps.length
     const done = state.completedStepIds.length
@@ -95,10 +101,29 @@ const RESULT_TONE: Record<string, string> = {
     const classification = state.lastClassification
     const errorTotal = Object.values(state.errors).reduce((a, b) => a + b, 0)
 
+    // The backend already split the two vocabularies; the fallback recomputes
+    // from `classes` so an older payload still cannot label a `book` as an
+    // experiment object.
+    const experimentDets = useMemo(() => {
+      const r = detection.result
+      if (!r) return []
+      if (r.experimentDetections) return r.experimentDetections
+      const vocab = new Set(detection.status?.experimentModel?.required ?? [])
+      return r.detections.filter(d => vocab.has(d.class_name))
+    }, [detection.result, detection.status])
+    const genericDets = useMemo(() => {
+      const r = detection.result
+      if (!r) return []
+      if (r.genericDetections) return r.genericDetections
+      const vocab = new Set(detection.status?.experimentModel?.required ?? [])
+      return r.detections.filter(d => d.class_name !== 'unknown_object' && !vocab.has(d.class_name))
+    }, [detection.result, detection.status])
+    const readiness = detection.status?.experimentModel
+
   return (
     <PageShell>
       {/* ── Run summary ──────────────────────────────────────────── */}
-      <div className="grid shrink-0 grid-cols-2 gap-[var(--grid-gap)] lg:grid-cols-4">
+      <div className="grid shrink-0 grid-cols-2 gap-[var(--grid-gap)] lg:grid-cols-5">
         <MetricCard
           label="Run status"
           value={state.status}
@@ -116,16 +141,34 @@ const RESULT_TONE: Record<string, string> = {
         <MetricCard
           label="Sequence errors"
           value={String(errorTotal)}
-          sub={`oos ${state.errors.outOfSequence} · skip ${state.errors.skipped} · rep ${state.errors.repeated}`}
+          sub={`oos ${state.errors.outOfSequence} · wobj ${state.errors.wrongObject} · wseq ${state.errors.wrongSequence} · skip ${state.errors.skipped} · rep ${state.errors.repeated}`}
           color={errorTotal > 0 ? '#f97316' : '#22c55e'}
           active={errorTotal > 0}
         />
         <MetricCard
           label="Engine"
           value={engine ? engine.status.replace(/_/g, ' ') : engineOffline ? 'OFFLINE' : '—'}
-          sub={engine ? `voice ${engine.voice.health} · q${engine.voice.queue_size}` : 'no snapshot'}
+          sub={
+            engine
+              ? `step ${(engine.current_step?.step_number ?? engine.completed_count) + 1} of ${engine.total_steps}`
+              : 'no snapshot'
+          }
           color={engine ? '#38bdf8' : '#64748b'}
           active={Boolean(engine)}
+        />
+        {/*
+          Voice is its OWN state machine, not a line under the engine one.
+          These used to be a single card, so "NOT STARTED" — which is the
+          *experiment* state — read as the voice engine failing while the voice
+          was in fact READY. The experiment can be RUNNING with voice in ERROR,
+          and only a separate card can say both.
+        */}
+        <MetricCard
+          label="Voice engine"
+          value={voiceStateLabel(engine?.voice)}
+          sub={voiceStateDetail(engine?.voice)}
+          color={voiceStateTone(engine?.voice)}
+          active={voiceState(engine?.voice) === VOICE_READY}
         />
       </div>
 
@@ -218,19 +261,25 @@ const RESULT_TONE: Record<string, string> = {
               </button>
             </div>
             <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+              {/*
+                Gated on the ENGINE's own state, not the v1 session's `running`.
+                Cross-wiring them meant starting a local simulator session
+                disabled the real engine start, which is exactly the control the
+                operator reaches for when nothing appears to happen.
+              */}
               <button
                 type="button"
                 onClick={onEngineStart}
-                disabled={running || busy}
+                disabled={engineRunning || busy}
                 className="btn-outline px-2 py-1.5"
               >
                 <span className="msym text-base leading-none">account_tree</span>
-                Engine start
+                {engineRunning ? 'Engine running' : 'Engine start'}
               </button>
               <button
                 type="button"
                 onClick={onEngineStop}
-                disabled={!running || busy}
+                disabled={!engineRunning || busy}
                 className="btn-outline px-2 py-1.5"
               >
                 <span className="msym text-base leading-none">pause</span>
@@ -372,6 +421,8 @@ const RESULT_TONE: Record<string, string> = {
                 <SubCard title="Sequence error counters">
                   <div className="grid grid-cols-2 gap-[var(--row-pad)]">
                     <StatTile label="Out of sequence" value={String(state.errors.outOfSequence)} />
+                    <StatTile label="Wrong object" value={String(state.errors.wrongObject)} />
+                    <StatTile label="Wrong sequence" value={String(state.errors.wrongSequence)} />
                     <StatTile label="Skipped" value={String(state.errors.skipped)} />
                     <StatTile label="Repeated" value={String(state.errors.repeated)} />
                     <StatTile label="Unknown" value={String(state.errors.unknown)} />
@@ -455,33 +506,72 @@ const RESULT_TONE: Record<string, string> = {
           scroll
           right={
             <span className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">
-              {detection.result?.detections.length ?? 0} detected
+              {experimentDets.length} exp · {genericDets.length} other
             </span>
           }
         >
           {(() => {
-            const detections = detection.result?.detections ?? []
             const watches = attendance.result?.watches ?? []
-            if (detections.length === 0 && watches.length === 0) {
-              return (
-                <EmptyState
-                  compact
-                  icon="track_changes"
-                  title="No tracked objects"
-                  description="Detected objects and their held/unattended state appear here. Object-level classes require the experiment detector — a generic YOLO cannot see the box classes."
-                />
-              )
-            }
             return (
               <div className="stack">
-                {detections.length > 0 && (
-                  <SubCard title={`Detections (${detections.length})`}>
+                {/*
+                  The honesty banner. A healthy camera with a general COCO model
+                  shows an EMPTY experiment panel, which is indistinguishable
+                  from a broken one unless the missing capability is named.
+                */}
+                {readiness && !readiness.ready && (
+                  <div
+                    className="border px-2 py-1.5"
+                    style={{
+                      borderColor: 'color-mix(in oklab, #f97316 55%, transparent)',
+                      background: 'color-mix(in oklab, #f97316 10%, transparent)',
+                    }}
+                  >
+                    <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#f97316]">
+                      {readiness.label}
+                    </p>
+                    <p className="mt-0.5 font-mono text-[10px] leading-snug text-on-surface">
+                      The loaded model cannot emit{' '}
+                      <span className="font-bold">{readiness.missing.join(', ')}</span>.
+                      No object in frame can produce these classes, so this panel
+                      stays empty regardless of the confidence threshold.
+                    </p>
+                    <p className="mt-0.5 font-mono text-[9px] uppercase tracking-widest text-on-surface-variant">
+                      model {detection.status?.modelPath ?? '—'} ·{' '}
+                      {detection.status?.modelType ?? '—'} ·{' '}
+                      {detection.status?.classCount ?? 0} classes
+                    </p>
+                  </div>
+                )}
+                {experimentDets.length > 0 && (
+                  <SubCard title={`Experiment objects (${experimentDets.length})`}>
                     <ul className="rows">
-                      {detections.slice(0, 8).map(d => (
+                      {experimentDets.slice(0, 8).map(d => (
                         <li key={`${d.class_name}-${d.x1}-${d.y1}`} className="truncate font-mono text-[10px]">
                           <span className="font-bold uppercase tracking-wider">{d.class_name}</span>{' '}
                           <span className="text-on-surface-variant">
                             {Math.round(d.confidence * 100)}% · {d.x1},{d.y1}–{d.x2},{d.y2}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </SubCard>
+                )}
+                {/*
+                  Generic COCO output, listed separately and labelled as such.
+                  Merging these into the experiment list is what made a `book`
+                  look like the experiment container.
+                */}
+                {genericDets.length > 0 && (
+                  <SubCard title={`Other objects — general model (${genericDets.length})`}>
+                    <ul className="rows">
+                      {genericDets.slice(0, 6).map(d => (
+                        <li key={`${d.class_name}-${d.x1}-${d.y1}`} className="truncate font-mono text-[10px]">
+                          <span className="font-bold uppercase tracking-wider text-on-surface-variant">
+                            {d.class_name}
+                          </span>{' '}
+                          <span className="text-on-surface-variant">
+                            {Math.round(d.confidence * 100)}%
                           </span>
                         </li>
                       ))}
@@ -506,6 +596,18 @@ const RESULT_TONE: Record<string, string> = {
                       ))}
                     </ul>
                   </SubCard>
+                )}
+                {experimentDets.length === 0 && genericDets.length === 0 && watches.length === 0 && (
+                  <EmptyState
+                    compact
+                    icon="track_changes"
+                    title="No tracked objects"
+                    description={
+                      readiness && !readiness.ready
+                        ? 'The loaded model has no experiment classes. General COCO objects appear separately below once detected.'
+                        : 'Detected objects and their held/unattended state appear here.'
+                    }
+                  />
                 )}
               </div>
             )

@@ -167,19 +167,57 @@ UNATTENDED_TRACKED_CLASSES = tuple(
     if c.strip()
 )
 
-# Activity perception stage (Phase 5C bridge). Chooses which source feeds the
-# state machine at runtime.
-#   live -> the camera-grounded LiveActivityPerception (DEFAULT): emits a step
-#           only when it actually sees the step's expectedObjects on camera.
+# Activity perception stage (Phase 5C bridge / procedure-aware). Chooses which
+# source feeds the state machine at runtime.
+#   interaction -> event-grounded InteractionActivityPerception (DEFAULT for the
+#           canonical experiment): runs the hand/object interaction tracker over
+#           the camera feed and emits a step only when the tracker's events
+#           satisfy that step's expectedEvents (a real PICK = MOVED episode, a
+#           PLACE = settling in the target area). Visibility alone never fires.
+#   live -> the camera-grounded LiveActivityPerception: emits a step only when
+#           it actually sees the step's expectedObjects on camera.
 #   mock -> deterministic MockActivityPerception (data-driven from the loaded
 #           experiment, clearly labeled as mock — demos without vision).
 #   sim  -> the original scripted SimulatedPerception (tests/backwards compat).
-ACTIVITY_BACKEND = os.environ.get("ACTIVITY_BACKEND", "live").strip().lower()
+ACTIVITY_BACKEND = os.environ.get("ACTIVITY_BACKEND", "interaction").strip().lower()
 # Live mode: accepted gap (ms) since the last camera inference before the scene
 # is stale. Stopped camera / frozen feed / disabled detector -> experiment waits.
 ACTIVITY_STALE_MS = int(os.environ.get("ACTIVITY_STALE_MS", "5000"))
 # Base pacing (ms) between live perception polls.
 ACTIVITY_POLL_MS = int(os.environ.get("ACTIVITY_POLL_MS", "700"))
+
+
+def _target_area() -> tuple[float, float, float, float] | None:
+    """The destination fixture as a normalized box, or ``None`` when unset.
+
+    No shipped detector can see the target area: `experiment_custom.onnx` emits
+    only red_box/yellow_box, yolov8n.onnx is COCO, and the heuristic detector is
+    person/red/yellow. The destination is a *fixed* piece of station hardware,
+    so its region is configuration, not perception - and pretending otherwise
+    means `*_PLACED` can never fire and PLACE_* is unreachable on camera.
+
+    Format: ``x1,y1,x2,y2`` normalized 0-1, left/top/right/bottom. Unset (the
+    default) keeps the honest limitation: the interaction source will then
+    report `targetAreaSource="none"` and refuse to ground PLACED.
+    """
+    raw = os.environ.get("ACTIVITY_TARGET_AREA", "").strip()
+    if not raw:
+        return None
+    parts = [p for p in raw.replace(";", ",").split(",") if p.strip()]
+    if len(parts) != 4:
+        return None
+    try:
+        box = tuple(float(p) for p in parts)
+    except ValueError:
+        return None
+    x1, y1, x2, y2 = box
+    if not (0.0 <= x1 < x2 <= 1.0 and 0.0 <= y1 < y2 <= 1.0):
+        return None
+    return box  # type: ignore[return-value]
+
+
+#: Normalized destination box for the interaction source, or None.
+ACTIVITY_TARGET_AREA = _target_area()
 
 # Optional absolute path to an experiment JSON. When unset, load_active_experiment
 # prefers the canonical experiment/experiment.json, falling back to EXPERIMENTS_DIR.

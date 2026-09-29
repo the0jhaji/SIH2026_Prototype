@@ -1,0 +1,37 @@
+{
+  "schema": "astra-experiment-sampling/1",
+  "session_id": "session_20260830_004657_ogda",
+  "activity": "PICK_YELLOW",
+  "label": "PICK_YELLOW",
+  "n_frames": 68,
+  "frame_ids": [
+    1,
+    2,
+    3,
+    4,
+    6,
+    9,
+    14,
+    19,
+    21,
+    27,
+    34,
+    40,
+    53,
+    65,
+    66,
+    67,
+    68
+  ],
+  "interaction_frame_ids": [
+    6,
+    9,
+    19,
+    21
+  ],
+  "motion": {
+    "mean": 6.198,
+    "max": 15.004,
+    "p90": 10.141
+  }
+}

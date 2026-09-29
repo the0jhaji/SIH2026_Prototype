@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { ALERT_COLORS, MISSION_COLORS, type StationAlert } from '../domain/safety'
 import { expectedStep } from '../domain/experiment'
+import { voiceStateDetail, voiceStateLabel } from '../domain/voice'
 import { formatTimestamp } from '../lib/time'
 import { Badge, EmptyState, KeyValue, MetricCard, Panel, StatTile, SubCard } from './ui'
 import { PageShell, Timeline } from './layout'
@@ -209,7 +210,7 @@ export function StationView({
                 {state.currentDetected?.activity?.replace(/_/g, ' ') ?? 'None interpreted'}
               </p>
               <p className="mt-0.5 font-mono text-[10px] text-on-surface-variant">
-                Voice {engine?.voice.health ?? '—'} · queue {engine?.voice.queue_size ?? 0}
+                Voice {voiceStateLabel(engine?.voice)} · {voiceStateDetail(engine?.voice)}
               </p>
             </SubCard>
           </div>

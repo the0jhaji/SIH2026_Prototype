@@ -61,11 +61,35 @@ export interface TraceStats {
   stages?: Record<string, number>
 }
 
+/**
+ * Can the loaded model actually emit the six-class experiment vocabulary?
+ *
+ * Mirrors `backend/app/detection_readiness.py`. `missing` is the honest
+ * headline: a general COCO detector running perfectly still misses
+ * `main_experiment_box`, and the UI must say so instead of showing an empty
+ * panel that looks like a camera fault.
+ */
+export interface ExperimentModelReadiness {
+  ready: boolean
+  label: string
+  /** Canonical vocabulary, in class-index order. */
+  required: string[]
+  /** Required classes this model CAN emit. */
+  supported: string[]
+  /** Required classes this model cannot emit. */
+  missing: string[]
+  modelClassCount: number
+  /** Fewer classes than the vocabulary => specialised, whatever the filename. */
+  narrow: boolean
+}
+
 export interface DetectionStatus {
   enabled: boolean
   detector: string | null
   modelLoaded: boolean
   modelPath: string | null
+  /** `experiment` | `general` | `narrow` | `not_loaded` | `unknown` | `none`. */
+  modelType?: string
   modelSizeMb: number | null
   /** Number of classes the loaded model can actually emit. */
   classCount: number | null
@@ -82,6 +106,15 @@ export interface DetectionStatus {
   detectionCount: number
   rawDetectionCount: number
   unknownCount: number
+  /** Per-class counts of the filtered (stable) feed. */
+  perClass?: Record<string, number>
+  /** Per-class counts of the raw current-frame feed. */
+  rawPerClass?: Record<string, number>
+  /** How many filtered detections are in the experiment vocabulary. */
+  experimentDetectionCount?: number
+  /** How many are COCO/other objects the general model can see. */
+  genericDetectionCount?: number
+  experimentModel?: ExperimentModelReadiness
   /** Configured AI rate cap; 0 = uncapped. Camera FPS is independent. */
   targetFps: number
   /** Measured AI inferences/sec over the last window. */
@@ -118,6 +151,19 @@ export interface DetectionResult {
   rawDetections: Detection[]
   unknownDetections: Detection[]
   rawUnknownDetections: Detection[]
+  /**
+   * Only detections in the six-class experiment vocabulary. Empty while the
+   * camera is healthy means the model cannot see these classes — a training
+   * gap, reported as such by {@link DetectionStatus.experimentModel}.
+   */
+  experimentDetections?: Detection[]
+  /**
+   * COCO/other objects, kept apart so a `book` is never drawn or listed as an
+   * experiment object.
+   */
+  genericDetections?: Detection[]
+  perClass?: Record<string, number>
+  rawPerClass?: Record<string, number>
   lastInferenceMs: number | null
   inferenceMs: number | null
   inferenceStatus: DetectionInferenceStatus

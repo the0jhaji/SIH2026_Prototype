@@ -112,18 +112,34 @@ Severity colouring: `ok` (green), `error` (rose), `warn` (amber), `info`.
 
 ## Perception backends (Phase 5C bridge)
 
-`backend/app/activity_perception.py` is the single seam. `ExperimentService`
-consumes any object exposing an async `detections()` iterator.
+`ExperimentService` consumes any object exposing an async `detections()`
+iterator.
 
-- **`live`** (default, `ACTIVITY_BACKEND=live`): camera-grounded.
-  `LiveActivityPerception` polls `DetectionService.latest()` (mock, yolo or
-  heuristic detectors) and emits the expected step's activity only when every
-  `expectedObjects` entry is present on a fresh frame above the confidence
-  threshold. Edge-triggered per step; stale/disabled/frozen camera feeds emit
-  nothing, so the experiment never advances or completes out of thin air.
-  A step with an empty `expectedObjects` list never fires — object hiding is
-  explicit, not guessed. Because only the expected step can emit, live mode is
-  silent about repeats/out-of-sequence (that coverage is the mock's job).
+- **`interaction`** (default, `ACTIVITY_BACKEND=interaction`):
+  `backend/app/interaction_perception.py` — event-grounded. Visibility is not an
+  action: a box sitting in frame proves nothing about a pick or a place. This
+  source feeds the real `ai.pipeline.interaction.InteractionTracker` (object
+  tracks, motion, settling) and emits a step only when its `expectedEvents`
+  (`PRESENT` / `MOVED` / `PLACED`) are satisfied by counted episodes. It is the
+  only source that can tell a PICK from a pass-by, and the one that drives
+  `WRONG_OBJECT` / `WRONG_SEQUENCE`.
+  - Evidence is edge-triggered and **consumed one episode at a time**, so
+    holding an object in view never re-fires a step and a step's confirmation
+    window cannot swallow the next step's motion. Terminal (`fresh: false`)
+    steps are latched so they are offered exactly once.
+  - `target_area` is **configuration** (`ACTIVITY_TARGET_AREA`, normalized
+    `x1,y1,x2,y2`), not a detection: no shipped model can see fixed station
+    hardware. Unset means the run reports `placedGrounded: false` and `PLACED`
+    is never claimed, rather than accepting any set-down object.
+  - No hand-landmark model is installed, so `HAND_NEAR_*` never fires and a
+    PICK is proven by object motion only.
+- **`live`** (`ACTIVITY_BACKEND=live`): camera-grounded, presence-only.
+  `LiveActivityPerception` polls `DetectionService.latest()` and emits the
+  expected step's activity when every `expectedObjects` entry is present on a
+  fresh frame above threshold. Edge-triggered per step; stale/disabled/frozen
+  feeds emit nothing. A step with empty `expectedObjects` never fires. Because
+  only the expected step can emit, it is silent about repeats/out-of-sequence,
+  and it cannot ground a step on a class no detector emits.
 - **`mock-activity`** (`ACTIVITY_BACKEND=mock`): deterministic, data driven
   from the loaded experiment — correct steps plus a fixed rotation of planted
   mistakes (later-step OOS, repeat, low-confidence, unknown) so a full run

@@ -9,6 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Optional
 
+#: Default event vocabulary produced by the tracker for the built-in demo
+#: classes (red_box/yellow_box). A custom prefix map (InteractionConfig.
+#: class_prefixes) extends this to other experiment objects — the resulting
+#: event names remain ``{PREFIX}_{KIND}`` / ``HAND_NEAR_{PREFIX}`` strings.
 InteractionEventType = Literal[
     "HAND_NEAR_RED",
     "HAND_NEAR_YELLOW",
@@ -30,7 +34,7 @@ class InteractionEvent:
     """One observation. ``name`` is derived from the object class plus the
     observed state; messages never claim a pick/place action was intentful."""
 
-    name: InteractionEventType
+    name: str
     object_class: str
     timestamp: int
     confidence: float

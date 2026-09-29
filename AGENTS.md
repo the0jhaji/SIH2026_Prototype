@@ -263,6 +263,45 @@ metadata + staged `escalation.json`). Rules:
   `Alerts`, `Station`, `Earth`, `Logs`; legacy box demo = `Demo` tab). Keep
   `npm run test:reducer`, `lint`, `build` green after changes.
 
+### Experiment-model readiness + voice lifecycle
+
+The Experiment Demo reports two things that used to be conflated and are easy
+to lie about. `backend/app/detection_readiness.py` (pure, camera-free) and
+`frontend/src/domain/voice.ts` are the contracts; the rules that matter:
+
+- **"Detection is on" and "detection can see the experiment objects" are
+  different claims.** The vocabulary is the six classes of
+  `dataset/experiment_detection/classes.json` (data — never a Python/TS list).
+  `model_readiness(classes)` compares what the *loaded* model can emit against
+  that list and emits `EXPERIMENT MODEL: NOT TRAINED / NOT READY` when anything
+  is missing. `yolov8n.onnx` covers only `person` (5 missing);
+  `experiment_custom.onnx` covers `red_box`/`yellow_box` (4 missing). **No
+  shipped model is ready, and no amount of conf_threshold tuning changes that** —
+  a high threshold deletes objects, it never invents a class.
+- `_model_type()` is derived from the loaded class list, never the filename.
+  `experiment_custom.onnx` with 2 classes is `narrow`, whatever it is called.
+- Detections are partitioned by vocabulary (`partition_detections`, and
+  `experimentDetections` / `genericDetections` in the payload) so a COCO `book`
+  is **never** listed or drawn as an experiment object. Merging the two feeds
+  is what made an empty experiment panel look like a camera fault.
+- `VoiceAlertService` is started by `ExperimentStateEngine.start()` — the
+  ENGINE START control — and **not** from `__init__`. A worker that spawns at
+  construction cannot report honestly that it has "not started". States are the
+  closed set `NOT_STARTED | STARTING | READY | ERROR` (+ `DISABLED` on the
+  client); `READY` is set only after `pyttsx3.init()` really returned, and a
+  failed init records the real exception in `error`. A dead TTS must never stop
+  a run — `start()` failure leaves the experiment `RUNNING` with voice `ERROR`.
+- The voice worker state and the experiment `status` are **separate** UI cards.
+  They were one card, so the experiment's own `NOT_STARTED` read as a dead voice
+  engine while pyttsx3 was `READY`. Never reintroduce a combined line, and never
+  gate the engine-start button on the v1 local session's `running` — that
+  cross-wiring disabled the one control the operator reaches for.
+- `close()` must tolerate a worker that is assigned but not yet alive
+  (`is_alive()` before `join`), or shutdown raises on a concurrent `start()`.
+
+Tests: `backend/tests/test_voice_lifecycle.py`,
+`backend/tests/test_detection_readiness.py`, `npm run test:voice`.
+
 ### Dataset (Phase 4A)
 
 `dataset/` is the **local-only** capture toolset (no upload, no cloud). The
@@ -338,6 +377,76 @@ installs a trained ONNX + `.names` for the runtime. Rules:
   `dataset\\scripts\\install_detection_model.py --onnx <exported>.onnx`. See
   `models/detection/README.md` for the full train → export → install → run loop.
 
+### Experiment detection dataset (Phase 3, human-in-the-loop)
+
+`experiment/yolo_training/` + `dataset/experiment_detection/` build a clean,
+human-verified detection dataset from the real recordings. **No training and no
+runtime change in this phase** — the stop condition is "tooling done, labels
+awaiting a human". Rules that are easy to break:
+
+- **A proposal is never ground truth.** `prelabel.py` writes only to
+  `proposals/`; confirmed labels live in `labels/staging/<session>/` and only
+  become rows via `experiment_tool.label_rows`, which drops every frame a human
+  has not marked `reviewed`. A generator that writes into the label tree is a
+  bug, not a shortcut.
+- **`reviewed` is durable and keyed on session + frame id**, never the bare
+  filename (every session has its own `frame_000074.txt`).
+  `experiment_tool.annotation_state` is the single source of truth read by BOTH
+  the UI and the validator, and `set_reviewed` is its only writer, so "is this
+  frame reviewed" cannot mean two different things. The UI persists a tick
+  immediately through `POST /api/review` and never defaults the checkbox to
+  checked; Save must report the stored review state rather than plain success.
+  A UI that re-derives the checkbox on every navigation will silently store
+  `reviewed=false` for a whole run of real labels — that bug happened, and it
+  is guarded by `test_review_state.py`. `review_frames.py --mark-reviewed`
+  repairs a lost flag from labels already on disk without touching a single
+  coordinate. Metadata writes are atomic+retrying: `os.replace` transiently
+  fails with WinError 5 on Windows.
+- Duplicate frame ids within one session are rejected at index time, because two
+  files claiming the same number would overwrite each other's labels.
+- The vocabulary is `dataset/experiment_detection/classes.json` (6 classes:
+  `person`, `main_experiment_box`, `red_box`, `yellow_box`, `red_target_area`,
+  `yellow_target_area`) — the YOLO class id is the index. Edit that file, never
+  a class list in code.
+- `PROPOSABLE` is exactly `person` (COCO), `red_box`/`yellow_box` (saturated
+  hue). `MANUAL_ONLY` is the container and both target areas: no geometric
+  proposal is invented for them, because a guessed box is a fabricated label.
+  The raw colour heuristics measurably fire on skin and clothing and jump 697px
+  between frames — they are candidates, and the count is expected to be far
+  above the truth.
+- **Never a detector class:** `opened_box`, `held_red_box`, `held_yellow_box`
+  and any action (`PICK_RED`, `PLACE_RED`, …). One frame cannot prove a hold or
+  a placement; the model answers WHAT/WHERE and the existing temporal extractor
+  answers the action. Enforced by
+  `test_action_and_state_classes_are_not_detector_classes`.
+- `dataset/experiment_train/` is **not** a source: the audit found it is 100%
+  class 0 (so `yellow_box` had zero boxes), has no exact hash match to any
+  recording, and is a frame-level split of one clip. Its `data.yaml` declares two
+  classes that its labels do not support. `experiment_custom.onnx` scored 3
+  `red_box` / 0 `yellow_box` over 98 frames. Treat both as broken input.
+- `images/{train,val,test}` and `labels/{train,val,test}` are created but stay
+  **empty**: splitting by recording session is the only honest split and the
+  data does not support it yet. `test_layout_has_empty_split_dirs_and_no_split_data`
+  guards this. Frame-level splitting is leakage.
+- Provenance is written with every label (`session_id`, `frame_id`, `source`,
+  `activity`, `reviewed`, `image_size`); a later split depends on it surviving.
+  Activity sessions (`dataset/activity/<ACTIVITY>/`) keep their procedure label
+  from the directory name — it is never a class.
+- A blank label file is a valid negative/background frame (`empty: true`), and a
+  frame with no label file at all is simply unreviewed. Never confuse the two.
+- Commands (backend venv, repo root): `sample_frames.py` (index + contact
+  sheets), `prelabel.py --sampled-only`,   `annotate.py` (FastAPI + canvas UI,
+  keys `1`-`6`/`N`/`P`/`D`/`S`), `validate_annotations.py` (exits 2 on errors,
+  `--strict` also fails on an unconfirmed class), `visualize_annotations.py`
+  (draws labels back for eye review), `review_frames.py` (list/repair review
+  flags), tests
+  `pytest experiment\\yolo_training\\tests -q`. See
+  `experiment/yolo_training/README.md`.
+- Later integration must reuse the single `DetectionService`
+  (`DETECTION_BACKEND=dual`) and the existing `ExperimentSession`; the pipeline
+  stays object → tracker → temporal event → one state machine. Adding a second
+  camera pipeline or a second procedure controller is out of scope.
+
 ### Activity dataset (Phase 5B)
 
 `dataset/scripts/record_activity.py` records **activity** takes into
@@ -357,6 +466,27 @@ installs a trained ONNX + `.names` for the runtime. Rules:
   `mock`. The recorder CLI + tests cover invalid-activity rejection.
 - `record_dataset.py` (object feeder `raw/`) and `experiment/experiment.json`
   stay untouched — activity sessions never mix with object sessions.
+
+### Procedure ground truth (`dataset/procedure_tool.py`)
+
+The object labels say *what is in the frame*; nothing said *which procedure
+step the frame belongs to*. `dataset/scripts/annotate_procedure.py` adds that
+label, derived from the canonical `experiment/experiment.json` so it cannot
+drift from the sequence the app enforces. Rules:
+
+- Shared logic lives in `dataset/procedure_tool.py` (pure, camera-free), and
+  per-frame classes come from the existing YOLO labels via
+  `annotation/annotator.py` — never re-implemented. Steps that require nothing
+  are never claimed, unmatched frames get `-` rather than a guess, and the
+  sequence label never moves backwards.
+- The label is **visibility-derived** (`expectedObjects`) and is *not* proof
+  that an action happened: one frame cannot prove motion or settling, so
+  `expectedEvents` is deliberately unused here. Say this in the module doc
+  rather than implying action ground truth.
+- Exits 2 with an explanation when nothing could be labelled, so an empty run
+  never looks like a successful one. Commands (backend venv, repo root):
+  `.\.venv\Scripts\python.exe dataset\scripts\annotate_procedure.py --session
+  <dir> --labels <dir>`, or `--root dataset --all`.
 
 ### Frontend (`frontend/`)
 
@@ -398,12 +528,53 @@ changes.
 
 ## Verify parity
 
-The `STEP_MATCHED` / `OUT_OF_SEQUENCE` / `SKIPPED_STEP` / `REPEATED_STEP` /
-`UNKNOWN_ACTIVITY` / `LOW_CONFIDENCE` classification is implemented twice —
-TypeScript (`frontend/src/domain/reducer.ts`) and Python
-(`backend/app/state_machine.py`). When changing behaviour, update **both** and
+The `STEP_MATCHED` / `OUT_OF_SEQUENCE` / `WRONG_OBJECT` / `WRONG_SEQUENCE` /
+`SKIPPED_STEP` / `REPEATED_STEP` / `UNKNOWN_ACTIVITY` / `LOW_CONFIDENCE`
+classification is implemented twice - TypeScript
+(`frontend/src/domain/reducer.ts`) and Python
+(`backend/app/state_machine.py`, mirrored in the temporal
+`backend/app/experiment_state.py`). When changing behaviour, update **both** and
 keep `npm run test:reducer` and `backend/tests/test_state_machine.py` in
-agreement. Each classification event also carries a short `result` label
-(`CORRECT` / `OUT_OF_SEQUENCE` / `SKIPPED` / `REPEATED` / `UNKNOWN` /
-`LOW_CONFIDENCE`), derived from `kind` in both implementations. See
-`docs/STATE_MACHINE.md` for the full transition table.
+agreement - the same script, kinds, counters and voice strings. Each
+classification event also carries a short `result` label (`CORRECT` /
+`OUT_OF_SEQUENCE` / `WRONG_OBJECT` / `WRONG_SEQUENCE` / `SKIPPED` / `REPEATED` /
+`UNKNOWN` / `LOW_CONFIDENCE`), derived from `kind` in both implementations. See
+`docs/STATE_MACHINE.md` for the full transition table and the refinement rule.
+
+### Procedure validation (event-grounded steps)
+
+`backend/app/interaction_perception.py` (`InteractionActivityPerception`,
+`ACTIVITY_BACKEND=interaction`, the default) turns the interaction tracker's
+motion/placement evidence into step detections. Rules that are easy to break:
+
+- A step consumes **exactly one** episode (`_consume` does `+= 1`). Marking
+  every accumulated episode as consumed starves later steps: `OPEN_BOX` waits
+  `confirm_polls` frames, by which time the `PICK_RED` move already happened.
+- A step whose rules are all cumulative (`fresh: false`, i.e. terminal steps
+  like `COMPLETE`) has nothing to spend and **must be latched** after emission.
+  Without the latch the source re-offers it every poll and, when the state
+  machine refuses it, emits forever - a busy loop that spams the log.
+- No grounding class may be one that **no shipped detector can emit**.
+  `experiment_box` is in the object table but no model produces it, so
+  `OPEN_BOX` is grounded on the first stored-box motion. Enforced by
+  `test_no_step_requires_a_class_no_detector_can_see`. Keep the limitation in
+  `evidenceNotes.KNOWN_LIMITS` rather than hiding it.
+- `target_area` is a **config value, not a detection** (`ACTIVITY_TARGET_AREA`,
+  `x1,y1,x2,y2` normalized 0-1). No shipped model can see the destination, and
+  it is fixed station hardware, so a detected box would be the fiction. With it
+  set, `_ingest` injects the region into the tracker input (a detected
+  `target_area` still wins if a future model provides one); with it unset,
+  status reports `targetAreaSource: none` / `placedGrounded: false` and `PLACED`
+  is never claimed. Do not "fix" this by hardcoding a default box — an
+  unconfigured target silently accepting any set-down object is the exact
+  failure this avoids.
+- No hand-landmark model is installed, so the tracker is fed `hands=[]` and
+  `HAND_NEAR_*` never fires: a PICK is proven by object motion only, never by
+  "held by the astronaut".
+- Steps with no `expectedEvents` deliberately never fire in this source; the
+  `live` source is the one that uses `expectedObjects`.
+- Steps carry `action`/`object` metadata and an explicit `voiceInstruction`.
+  The refusal kinds (`WRONG_OBJECT`/`WRONG_SEQUENCE`) are only possible where
+  that metadata exists, and voice prose must come from `voiceInstruction` -
+  `label` is third-person operator prose and splitting it produced "Please
+  astronaut the picks up the red box."

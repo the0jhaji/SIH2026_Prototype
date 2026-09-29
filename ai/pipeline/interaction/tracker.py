@@ -36,6 +36,10 @@ class InteractionConfig:
     target_margin: float = 0.15  # proportional margin around the target_area box
     max_assoc_distance: float = 0.25  # fraction of the frame diagonal for object continuity
     hand_assoc_distance: float = 0.25  # normalized wrist distance for hand continuity
+    #: Optional class_name → event-prefix map for objects beyond the built-in
+    #: demo pair (e.g. {"experiment_box": "EXPERIMENT"}). When set it also
+    #: defines which classes the tracker reasons about.
+    class_prefixes: Optional[dict[str, str]] = None
 
 
 @dataclass
@@ -62,8 +66,14 @@ class ObjectTrack:
 class InteractionTracker:
     """Stateful tracker. Call :meth:`update` once per frame."""
 
-    #: Object classes the tracker reasons about (→ RED/YELLOW events).
-    supported_classes = tuple(OBJECT_TO_PREFIX)
+    @property
+    def supported_classes(self) -> tuple[str, ...]:
+        """Object classes the tracker reasons about (→ PREFIX events). A custom
+        ``class_prefixes`` map widens (or replaces) the built-in demo pair."""
+        return (
+            tuple(self.config.class_prefixes or ())
+            or tuple(OBJECT_TO_PREFIX)
+        )
 
     def __init__(self, config: Optional[InteractionConfig] = None) -> None:
         self.config = config or InteractionConfig()
@@ -84,7 +94,8 @@ class InteractionTracker:
     # ------------------------------------------------------------------ utils
 
     def _name(self, class_name: str, kind: str) -> InteractionEventType:
-        prefix = OBJECT_TO_PREFIX[class_name]
+        prefixes = self.config.class_prefixes or OBJECT_TO_PREFIX
+        prefix = prefixes[class_name]
         name = f"HAND_NEAR_{prefix}" if kind == "NEAR" else f"{prefix}_{kind}"
         return name  # type: ignore[return-value]
 

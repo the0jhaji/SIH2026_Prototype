@@ -9,6 +9,7 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test:reducer": "node scripts/test-reducer.mjs",
+    "test:voice": "node scripts/test-voice.mjs",
     "test:overlay": "node scripts/test-overlay.mjs",
     "test:camera": "node scripts/test-camera.mjs",
     "test:camera-parity": "node scripts/test-camera-parity.mjs"

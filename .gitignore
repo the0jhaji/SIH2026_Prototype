@@ -35,3 +35,13 @@ Thumbs.db
 
 # Logs
 *.log
+.startup_logs/
+
+# Experiment detection dataset: proposals are candidates, and the label tree is
+# human output under review. Track the tooling and classes.json, not the pixels,
+# and never let an unreviewed proposal reach git history.
+dataset/experiment_detection/proposals/
+dataset/experiment_detection/labels/
+dataset/experiment_detection/qa/
+dataset/experiment_detection/sampling/*.jpg
+experiment/yolo_training/**/__pycache__/

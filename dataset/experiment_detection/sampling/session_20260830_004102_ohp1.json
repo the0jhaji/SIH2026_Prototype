@@ -1,0 +1,37 @@
+{
+  "schema": "astra-experiment-sampling/1",
+  "session_id": "session_20260830_004102_ohp1",
+  "activity": "APPROACH",
+  "label": "APPROACH",
+  "n_frames": 92,
+  "frame_ids": [
+    1,
+    2,
+    3,
+    4,
+    19,
+    27,
+    29,
+    36,
+    37,
+    42,
+    46,
+    55,
+    73,
+    89,
+    90,
+    91,
+    92
+  ],
+  "interaction_frame_ids": [
+    27,
+    29,
+    36,
+    42
+  ],
+  "motion": {
+    "mean": 4.235,
+    "max": 19.425,
+    "p90": 9.584
+  }
+}

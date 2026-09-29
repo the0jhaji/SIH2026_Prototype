@@ -23,7 +23,7 @@ from typing import Any, Callable, Optional
 from .experiment import expected_step, step_for_activity
 from .experiment_log import ExperimentLogger
 from .schemas import Detection, ExperimentDef, ExpEvent, StepDef
-from .state_machine import ExperimentSession
+from .state_machine import _object_speech, ExperimentSession, wrong_step_kind
 from .voice_alert import VoiceAlertService
 
 logger = logging.getLogger("astraai.experiment_state")
@@ -127,6 +127,11 @@ class ExperimentStateEngine:
         return expected_step(self.experiment, self._current_step_index)
 
     @property
+    def current_step_index(self) -> int:
+        """Index of the step currently being waited on (drives source wiring)."""
+        return self._current_step_index
+
+    @property
     def next_step(self) -> Optional[StepDef]:
         idx = self._current_step_index + 1
         return expected_step(self.experiment, idx) if idx < len(self.experiment.steps) else None
@@ -189,8 +194,15 @@ class ExperimentStateEngine:
         first = self.current_step
         first_data = self._step_dict(first, 1) if first else {}
 
-        # Voice: announce experiment start + first step
-        if self._voice:
+        # Voice: start the TTS worker and report what actually happened, then
+        # announce. The engine's own `state` is RUNNING from this point on; the
+        # voice worker reports its own lifecycle separately and must never be
+        # claimed as ready just because the experiment started.
+        if self._voice is not None:
+            try:
+                self._voice.start()
+            except Exception:  # noqa: BLE001 - voice must never block a run
+                logger.warning("Voice worker failed to start", exc_info=True)
             self._voice.announce_experiment_started(self.experiment.name)
             if first:
                 self._voice.announce_next_step(first.label, 1, self.total_steps)
@@ -376,14 +388,34 @@ class ExperimentStateEngine:
 
     def _handle_out_of_sequence(self, detection: Detection, observed_step: StepDef, expected: Optional[StepDef]) -> dict:
         expected_label = expected.label if expected else "unknown"
+        # Refined classification: the same action on the wrong object is
+        # WRONG_OBJECT, the right object with the wrong action is WRONG_SEQUENCE,
+        # everything else stays OUT_OF_SEQUENCE (state_machine.wrong_step_kind).
+        kind = wrong_step_kind(expected, observed_step)
         self._last_event = {
-            "kind": "out_of_sequence",
+            "kind": kind.lower(),
             "observed": observed_step.activity,
             "expected": expected.activity if expected else None,
         }
+        message_map = {
+            "WRONG_OBJECT": lambda: (
+                f"Wrong object: {observed_step.activity} while expected "
+                f"{expected.activity if expected else 'unknown'}. "
+                f"{_object_speech(expected.object).capitalize()} is expected, "
+                f"not {_object_speech(observed_step.object)}."
+            ),
+            "WRONG_SEQUENCE": lambda: (
+                f"Wrong sequence: {observed_step.activity} while expected "
+                f"{expected.activity if expected else 'unknown'}"
+            ),
+            "OUT_OF_SEQUENCE": lambda: (
+                f"Out of sequence: {observed_step.activity} while expected "
+                f"{expected.activity if expected else 'unknown'}"
+            ),
+        }
         alert = self._record_alert(
-            "OUT_OF_SEQUENCE",
-            f"Out of sequence: {observed_step.activity} while expected {expected.activity if expected else 'unknown'}",
+            kind,
+            message_map[kind](),
             expected_step=expected.id if expected else None,
             observed_step=observed_step.id,
             recovery=f"Return to {expected_label} before continuing.",
@@ -393,17 +425,25 @@ class ExperimentStateEngine:
             self._violation_started_at = now
         self._announce_recovery_if_due()
         if self._voice:
-            self._voice.announce_out_of_sequence(expected_label)
+            if kind == "WRONG_OBJECT":
+                self._voice.announce_wrong_object(
+                    _object_speech(expected.object) if expected else "the next step",
+                    _object_speech(observed_step.object),
+                )
+            elif kind == "WRONG_SEQUENCE":
+                self._voice.announce_wrong_sequence(expected_label)
+            else:
+                self._voice.announce_out_of_sequence(expected_label)
             self._voice.announce_recovery(expected_label)
         self._emit_log(
-            "out_of_sequence",
+            kind.lower(),
             expected_step=expected.id if expected else None,
             expected_activity=expected.activity if expected else None,
             observed_step=observed_step.id,
             observed_activity=observed_step.activity,
             status="SEQUENCE_VIOLATION",
         )
-        self._emit_ws("out_of_sequence", {
+        self._emit_ws(kind.lower(), {
             "expected_step": expected.id if expected else None,
             "expected_activity": expected.activity if expected else None,
             "observed_step": observed_step.id,
@@ -515,8 +555,39 @@ class ExperimentStateEngine:
             "last_activity": self._last_activity,
             "last_alert": self._last_alert,
             "last_event": self._last_event,
-            "voice": {
-                "health": self._voice.health if self._voice else "disabled",
-                "queue_size": self._voice.queue_size if self._voice else 0,
-            },
+            # The voice worker's own lifecycle, never the experiment's. A run
+            # can be RUNNING while voice is ERROR, and the UI has to be able to
+            # tell those apart.
+            "voice": self._voice_snapshot(),
+        }
+
+    def _voice_snapshot(self) -> dict:
+        if self._voice is None:
+            return {
+                "state": "DISABLED",
+                "ready": False,
+                "error": None,
+                "queueSize": 0,
+                "queue_size": 0,
+                "health": "DISABLED",
+            }
+        try:
+            st = self._voice.status()
+        except Exception:  # noqa: BLE001 - telemetry must never break a snapshot
+            return {
+                "state": "ERROR",
+                "ready": False,
+                "error": "voice status unavailable",
+                "queueSize": 0,
+                "queue_size": 0,
+                "health": "ERROR",
+            }
+        return {
+            "state": st["state"],
+            "ready": st["ready"],
+            "error": st["error"],
+            "queueSize": st["queueSize"],
+            # snake_case alias: the historical shape is still read by StationView.
+            "queue_size": st["queueSize"],
+            "health": st["state"],
         }

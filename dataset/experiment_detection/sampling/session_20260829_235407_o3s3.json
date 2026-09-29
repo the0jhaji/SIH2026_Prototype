@@ -1,0 +1,37 @@
+{
+  "schema": "astra-experiment-sampling/1",
+  "session_id": "session_20260829_235407_o3s3",
+  "activity": null,
+  "label": "box_experiment",
+  "n_frames": 98,
+  "frame_ids": [
+    1,
+    2,
+    3,
+    4,
+    11,
+    20,
+    34,
+    39,
+    49,
+    54,
+    58,
+    66,
+    77,
+    95,
+    96,
+    97,
+    98
+  ],
+  "interaction_frame_ids": [
+    11,
+    34,
+    54,
+    66
+  ],
+  "motion": {
+    "mean": 6.99,
+    "max": 19.085,
+    "p90": 10.981
+  }
+}

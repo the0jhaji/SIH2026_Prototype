@@ -61,7 +61,8 @@ def test_full_simulation_run() -> None:
         final = wait_until(client, lambda s: s["status"] == "COMPLETED")
         assert len(final["completedStepIds"]) == 6
         assert final["recording"] is False
-        assert final["errors"] == {"outOfSequence": 0, "skipped": 0, "repeated": 0,
+        assert final["errors"] == {"outOfSequence": 0, "wrongObject": 0,
+                                   "wrongSequence": 0, "skipped": 0, "repeated": 0,
                                    "unknown": 0, "lowConfidence": 0}
 
         logs = client.get("/api/logs").json()["events"]
